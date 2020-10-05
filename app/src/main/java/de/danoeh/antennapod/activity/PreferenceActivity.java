@@ -16,7 +16,7 @@ import de.danoeh.antennapod.R;
 import de.danoeh.antennapod.core.preferences.UserPreferences;
 import de.danoeh.antennapod.fragment.preferences.AutoDownloadPreferencesFragment;
 import de.danoeh.antennapod.fragment.preferences.GpodderPreferencesFragment;
-import de.danoeh.antennapod.fragment.preferences.IntegrationsPreferencesFragment;
+import de.danoeh.antennapod.fragment.preferences.ImportExportPreferencesFragment;
 import de.danoeh.antennapod.fragment.preferences.MainPreferencesFragment;
 import de.danoeh.antennapod.fragment.preferences.NetworkPreferencesFragment;
 import de.danoeh.antennapod.fragment.preferences.PlaybackPreferencesFragment;
@@ -28,6 +28,8 @@ import de.danoeh.antennapod.fragment.preferences.UserInterfacePreferencesFragmen
  * PreferenceController.
  */
 public class PreferenceActivity extends AppCompatActivity implements SearchPreferenceResultListener {
+    private static final String FRAGMENT_TAG = "tag_preferences";
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         setTheme(UserPreferences.getTheme());
@@ -44,8 +46,11 @@ public class PreferenceActivity extends AppCompatActivity implements SearchPrefe
                 ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
 
-        getSupportFragmentManager().beginTransaction().replace(R.id.content, new MainPreferencesFragment()).commit();
-
+        if (getSupportFragmentManager().findFragmentByTag(FRAGMENT_TAG) == null) {
+            getSupportFragmentManager().beginTransaction()
+                    .replace(R.id.content, new MainPreferencesFragment(), FRAGMENT_TAG)
+                    .commit();
+        }
     }
 
     private PreferenceFragmentCompat getPreferenceScreen(int screen) {
@@ -53,12 +58,12 @@ public class PreferenceActivity extends AppCompatActivity implements SearchPrefe
 
         if (screen == R.xml.preferences_user_interface) {
             prefFragment = new UserInterfacePreferencesFragment();
-        } else if (screen == R.xml.preferences_integrations) {
-            prefFragment = new IntegrationsPreferencesFragment();
         } else if (screen == R.xml.preferences_network) {
             prefFragment = new NetworkPreferencesFragment();
         } else if (screen == R.xml.preferences_storage) {
             prefFragment = new StoragePreferencesFragment();
+        } else if (screen == R.xml.preferences_import_export) {
+            prefFragment = new ImportExportPreferencesFragment();
         } else if (screen == R.xml.preferences_autodownload) {
             prefFragment = new AutoDownloadPreferencesFragment();
         } else if (screen == R.xml.preferences_gpodder) {
@@ -79,10 +84,10 @@ public class PreferenceActivity extends AppCompatActivity implements SearchPrefe
                 return R.string.playback_pref;
             case R.xml.preferences_storage:
                 return R.string.storage_pref;
+            case R.xml.preferences_import_export:
+                return R.string.import_export_pref;
             case R.xml.preferences_user_interface:
                 return R.string.user_interface_label;
-            case R.xml.preferences_integrations:
-                return R.string.integrations_label;
             case R.xml.preferences_gpodder:
                 return R.string.gpodnet_main_label;
             default:

@@ -1,12 +1,15 @@
 package de.danoeh.antennapod.core.feed;
 
 import android.database.Cursor;
+
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import android.text.TextUtils;
 
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 
+import java.io.Serializable;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
@@ -24,7 +27,7 @@ import de.danoeh.antennapod.core.util.ShownotesProvider;
  *
  * @author daniel
  */
-public class FeedItem extends FeedComponent implements ShownotesProvider, ImageResource {
+public class FeedItem extends FeedComponent implements ShownotesProvider, ImageResource, Serializable {
 
     /** tag that indicates this item is in the queue */
     public static final String TAG_QUEUE = "Queue";
@@ -140,17 +143,17 @@ public class FeedItem extends FeedComponent implements ShownotesProvider, ImageR
     }
 
     public static FeedItem fromCursor(Cursor cursor) {
-        int indexId = cursor.getColumnIndex(PodDBAdapter.KEY_ID);
-        int indexTitle = cursor.getColumnIndex(PodDBAdapter.KEY_TITLE);
-        int indexLink = cursor.getColumnIndex(PodDBAdapter.KEY_LINK);
-        int indexPubDate = cursor.getColumnIndex(PodDBAdapter.KEY_PUBDATE);
-        int indexPaymentLink = cursor.getColumnIndex(PodDBAdapter.KEY_PAYMENT_LINK);
-        int indexFeedId = cursor.getColumnIndex(PodDBAdapter.KEY_FEED);
-        int indexHasChapters = cursor.getColumnIndex(PodDBAdapter.KEY_HAS_CHAPTERS);
-        int indexRead = cursor.getColumnIndex(PodDBAdapter.KEY_READ);
-        int indexItemIdentifier = cursor.getColumnIndex(PodDBAdapter.KEY_ITEM_IDENTIFIER);
-        int indexAutoDownload = cursor.getColumnIndex(PodDBAdapter.KEY_AUTO_DOWNLOAD);
-        int indexImageUrl = cursor.getColumnIndex(PodDBAdapter.KEY_IMAGE_URL);
+        int indexId = cursor.getColumnIndexOrThrow(PodDBAdapter.SELECT_KEY_ITEM_ID);
+        int indexTitle = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_TITLE);
+        int indexLink = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_LINK);
+        int indexPubDate = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_PUBDATE);
+        int indexPaymentLink = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_PAYMENT_LINK);
+        int indexFeedId = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_FEED);
+        int indexHasChapters = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_HAS_CHAPTERS);
+        int indexRead = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_READ);
+        int indexItemIdentifier = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_ITEM_IDENTIFIER);
+        int indexAutoDownload = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_AUTO_DOWNLOAD);
+        int indexImageUrl = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_IMAGE_URL);
 
         long id = cursor.getInt(indexId);
         String title = cursor.getString(indexTitle);
@@ -185,7 +188,7 @@ public class FeedItem extends FeedComponent implements ShownotesProvider, ImageR
         if (other.link != null) {
             link = other.link;
         }
-        if (other.pubDate != null && other.pubDate.equals(pubDate)) {
+        if (other.pubDate != null && !other.pubDate.equals(pubDate)) {
             pubDate = other.pubDate;
         }
         if (other.media != null) {
@@ -359,7 +362,7 @@ public class FeedItem extends FeedComponent implements ShownotesProvider, ImageR
     public Callable<String> loadShownotes() {
         return () -> {
             if (contentEncoded == null || description == null) {
-                DBReader.loadExtraInformationOfFeedItem(FeedItem.this);
+                DBReader.loadDescriptionOfFeedItem(FeedItem.this);
             }
             if (TextUtils.isEmpty(contentEncoded)) {
                 return description;
@@ -375,10 +378,10 @@ public class FeedItem extends FeedComponent implements ShownotesProvider, ImageR
 
     @Override
     public String getImageLocation() {
-        if(media != null && media.hasEmbeddedPicture()) {
-            return media.getImageLocation();
-        } else if (imageUrl != null) {
-           return imageUrl;
+        if (imageUrl != null) {
+            return imageUrl;
+        } else if (media != null && media.hasEmbeddedPicture()) {
+            return media.getLocalMediaUrl();
         } else if (feed != null) {
             return feed.getImageLocation();
         } else {
@@ -411,11 +414,12 @@ public class FeedItem extends FeedComponent implements ShownotesProvider, ImageR
     }
 
     /**
-     * Returns the image of this item or the image of the feed if this item does
-     * not have its own image.
+     * Returns the image of this item, as specified in the feed.
+     * To load the image that can be displayed to the user, use {@link #getImageLocation},
+     * which also considers embedded pictures or the feed picture if no other picture is present.
      */
     public String getImageUrl() {
-        return (imageUrl != null) ? imageUrl : feed.getImageUrl();
+        return imageUrl;
     }
 
     public void setImageUrl(String imageUrl) {
@@ -480,6 +484,7 @@ public class FeedItem extends FeedComponent implements ShownotesProvider, ImageR
      */
     public void removeTag(String tag) { tags.remove(tag); }
 
+    @NonNull
     @Override
     public String toString() {
         return ToStringBuilder.reflectionToString(this, ToStringStyle.SHORT_PREFIX_STYLE);

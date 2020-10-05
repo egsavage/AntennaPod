@@ -1,12 +1,20 @@
 package de.test.antennapod.ui;
 
 import android.content.Context;
-import android.graphics.Bitmap;
 import android.util.Log;
-
+import de.danoeh.antennapod.core.event.FeedListUpdateEvent;
+import de.danoeh.antennapod.core.event.QueueEvent;
+import de.danoeh.antennapod.core.feed.Feed;
+import de.danoeh.antennapod.core.feed.FeedItem;
+import de.danoeh.antennapod.core.feed.FeedMedia;
+import de.danoeh.antennapod.core.storage.PodDBAdapter;
+import de.test.antennapod.util.service.download.HTTPBin;
+import de.test.antennapod.util.syndication.feedgenerator.Rss2Generator;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.greenrobot.eventbus.EventBus;
+import org.junit.Assert;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -15,35 +23,21 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
-
-import de.danoeh.antennapod.activity.MainActivity;
-import de.danoeh.antennapod.core.event.QueueEvent;
-import de.danoeh.antennapod.core.feed.EventDistributor;
-import de.danoeh.antennapod.core.feed.Feed;
-import de.danoeh.antennapod.core.feed.FeedItem;
-import de.danoeh.antennapod.core.feed.FeedMedia;
-import de.danoeh.antennapod.core.storage.PodDBAdapter;
-import de.danoeh.antennapod.core.util.playback.PlaybackController;
-import de.danoeh.antennapod.fragment.ExternalPlayerFragment;
-import de.test.antennapod.util.service.download.HTTPBin;
-import de.test.antennapod.util.syndication.feedgenerator.RSS2Generator;
-import org.greenrobot.eventbus.EventBus;
-import org.junit.Assert;
+import java.util.Locale;
 
 /**
  * Utility methods for UI tests.
  * Starts a web server that hosts feeds, episodes and images.
  */
-class UITestUtils {
+public class UITestUtils {
 
     private static final String TAG = UITestUtils.class.getSimpleName();
 
     private static final int NUM_FEEDS = 5;
     private static final int NUM_ITEMS_PER_FEED = 10;
 
-    private static final String TEST_FILE_NAME = "3sec.mp3";
-
-
+    private String testFileName = "3sec.mp3";
+    private boolean hostTextOnlyFeeds = false;
     private final Context context;
     private final HTTPBin server = new HTTPBin();
     private File destDir;
@@ -84,37 +78,28 @@ class UITestUtils {
     private String hostFeed(Feed feed) throws IOException {
         File feedFile = new File(hostedFeedDir, feed.getTitle());
         FileOutputStream out = new FileOutputStream(feedFile);
-        RSS2Generator generator = new RSS2Generator();
+        Rss2Generator generator = new Rss2Generator();
         generator.writeFeed(feed, out, "UTF-8", 0);
         out.close();
         int id = server.serveFile(feedFile);
         Assert.assertTrue(id != -1);
-        return String.format("%s/files/%d", HTTPBin.BASE_URL, id);
+        return String.format(Locale.US, "%s/files/%d", server.getBaseUrl(), id);
     }
 
     private String hostFile(File file) {
         int id = server.serveFile(file);
         Assert.assertTrue(id != -1);
-        return String.format("%s/files/%d", HTTPBin.BASE_URL, id);
-    }
-
-    private File newBitmapFile(String name) throws IOException {
-        File imgFile = new File(destDir, name);
-        Bitmap bitmap = Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888);
-        FileOutputStream out = new FileOutputStream(imgFile);
-        bitmap.compress(Bitmap.CompressFormat.PNG, 1, out);
-        out.close();
-        return imgFile;
+        return String.format(Locale.US, "%s/files/%d", server.getBaseUrl(), id);
     }
 
     private File newMediaFile(String name) throws IOException {
         File mediaFile = new File(hostedMediaDir, name);
-        if(mediaFile.exists()) {
+        if (mediaFile.exists()) {
             mediaFile.delete();
         }
         Assert.assertFalse(mediaFile.exists());
 
-        InputStream in = context.getAssets().open(TEST_FILE_NAME);
+        InputStream in = context.getAssets().open(testFileName);
         Assert.assertNotNull(in);
 
         FileOutputStream out = new FileOutputStream(mediaFile);
@@ -143,9 +128,10 @@ class UITestUtils {
                         "http://example.com/feed" + i + "/item/" + j, new Date(), FeedItem.UNPLAYED, feed);
                 items.add(item);
 
-                File mediaFile = newMediaFile("feed-" + i + "-episode-" + j + ".mp3");
-                item.setMedia(new FeedMedia(j, item, 0, 0, mediaFile.length(), "audio/mp3", null, hostFile(mediaFile), false, null, 0, 0));
-
+                if (!hostTextOnlyFeeds) {
+                    File mediaFile = newMediaFile("feed-" + i + "-episode-" + j + ".mp3");
+                    item.setMedia(new FeedMedia(j, item, 0, 0, mediaFile.length(), "audio/mp3", null, hostFile(mediaFile), false, null, 0, 0));
+                }
             }
             feed.setItems(items);
             feed.setDownload_url(hostFeed(feed));
@@ -192,25 +178,26 @@ class UITestUtils {
             }
 
             queue.add(feed.getItems().get(0));
-            feed.getItems().get(1).getMedia().setPlaybackCompletionDate(new Date());
+            if (feed.getItems().get(1).hasMedia()) {
+                feed.getItems().get(1).getMedia().setPlaybackCompletionDate(new Date());
+            }
         }
         localFeedDataAdded = true;
 
         PodDBAdapter adapter = PodDBAdapter.getInstance();
         adapter.open();
-        adapter.setCompleteFeed(hostedFeeds.toArray(new Feed[hostedFeeds.size()]));
+        adapter.setCompleteFeed(hostedFeeds.toArray(new Feed[0]));
         adapter.setQueue(queue);
         adapter.close();
-        EventDistributor.getInstance().sendFeedUpdateBroadcast();
+        EventBus.getDefault().post(new FeedListUpdateEvent(hostedFeeds));
         EventBus.getDefault().post(QueueEvent.setQueue(queue));
     }
 
-    public PlaybackController getPlaybackController(MainActivity mainActivity) {
-        ExternalPlayerFragment fragment = (ExternalPlayerFragment)mainActivity.getSupportFragmentManager().findFragmentByTag(ExternalPlayerFragment.TAG);
-        return fragment.getPlaybackControllerTestingOnly();
+    public void setMediaFileName(String filename) {
+        testFileName = filename;
     }
 
-    public FeedMedia getCurrentMedia(MainActivity mainActivity) {
-        return (FeedMedia)getPlaybackController(mainActivity).getMedia();
+    public void setHostTextOnlyFeeds(boolean hostTextOnlyFeeds) {
+        this.hostTextOnlyFeeds = hostTextOnlyFeeds;
     }
 }

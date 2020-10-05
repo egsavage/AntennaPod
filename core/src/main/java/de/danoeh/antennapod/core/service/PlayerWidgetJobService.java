@@ -6,8 +6,8 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.content.SharedPreferences;
 import android.graphics.Bitmap;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
 import androidx.annotation.NonNull;
@@ -24,12 +24,13 @@ import java.util.concurrent.TimeUnit;
 
 import de.danoeh.antennapod.core.R;
 import de.danoeh.antennapod.core.glide.ApGlideSettings;
-import de.danoeh.antennapod.core.preferences.PlaybackSpeedHelper;
+import de.danoeh.antennapod.core.feed.util.PlaybackSpeedUtils;
 import de.danoeh.antennapod.core.receiver.MediaButtonReceiver;
 import de.danoeh.antennapod.core.receiver.PlayerWidget;
 import de.danoeh.antennapod.core.service.playback.PlaybackService;
 import de.danoeh.antennapod.core.service.playback.PlayerStatus;
 import de.danoeh.antennapod.core.util.Converter;
+import de.danoeh.antennapod.core.feed.util.ImageResourceUtils;
 import de.danoeh.antennapod.core.util.TimeSpeedConverter;
 import de.danoeh.antennapod.core.util.playback.Playable;
 
@@ -102,12 +103,8 @@ public class PlayerWidgetJobService extends SafeJobIntentService {
         AppWidgetManager manager = AppWidgetManager.getInstance(this);
         int[] widgetIds = manager.getAppWidgetIds(playerWidget);
         RemoteViews views = new RemoteViews(getPackageName(), R.layout.player_widget);
-        PendingIntent startMediaplayer = PendingIntent.getActivity(this, 0,
-                PlaybackService.getPlayerActivityIntent(this), 0);
-
-        final PendingIntent startAppPending = PendingIntent.getActivity(this, 0,
-                PlaybackService.getPlayerActivityIntent(this),
-                PendingIntent.FLAG_UPDATE_CURRENT);
+        final PendingIntent startMediaPlayer = PendingIntent.getActivity(this, R.id.pending_intent_player_activity,
+                PlaybackService.getPlayerActivityIntent(this), PendingIntent.FLAG_UPDATE_CURRENT);
 
         boolean nothingPlaying = false;
         Playable media;
@@ -121,21 +118,21 @@ public class PlayerWidgetJobService extends SafeJobIntentService {
         }
 
         if (media != null) {
-            views.setOnClickPendingIntent(R.id.layout_left, startMediaplayer);
+            views.setOnClickPendingIntent(R.id.layout_left, startMediaPlayer);
 
             try {
-                Bitmap icon = null;
+                Bitmap icon;
                 int iconSize = getResources().getDimensionPixelSize(android.R.dimen.app_icon_size);
                 icon = Glide.with(PlayerWidgetJobService.this)
                         .asBitmap()
-                        .load(media.getImageLocation())
+                        .load(ImageResourceUtils.getImageLocation(media))
                         .apply(RequestOptions.diskCacheStrategyOf(ApGlideSettings.AP_DISK_CACHE_STRATEGY))
                         .submit(iconSize, iconSize)
                         .get(500, TimeUnit.MILLISECONDS);
                 views.setImageViewBitmap(R.id.imgvCover, icon);
             } catch (Throwable tr) {
                 Log.e(TAG, "Error loading the media icon for the widget", tr);
-                views.setImageViewResource(R.id.imgvCover, R.mipmap.ic_launcher_foreground);
+                views.setImageViewResource(R.id.imgvCover, R.mipmap.ic_launcher_round);
             }
 
             views.setTextViewText(R.id.txtvTitle, media.getEpisodeTitle());
@@ -147,7 +144,7 @@ public class PlayerWidgetJobService extends SafeJobIntentService {
                 progressString = getProgressString(playbackService.getCurrentPosition(),
                         playbackService.getDuration(), playbackService.getCurrentPlaybackSpeed());
             } else {
-                progressString = getProgressString(media.getPosition(), media.getDuration(), PlaybackSpeedHelper.getCurrentPlaybackSpeed(media));
+                progressString = getProgressString(media.getPosition(), media.getDuration(), PlaybackSpeedUtils.getCurrentPlaybackSpeed(media));
             }
 
             if (progressString != null) {
@@ -156,15 +153,11 @@ public class PlayerWidgetJobService extends SafeJobIntentService {
             }
 
             if (status == PlayerStatus.PLAYING) {
-                views.setImageViewResource(R.id.butPlay, R.drawable.ic_pause_white_24dp);
-                if (Build.VERSION.SDK_INT >= 15) {
-                    views.setContentDescription(R.id.butPlay, getString(R.string.pause_label));
-                }
+                views.setImageViewResource(R.id.butPlay, R.drawable.ic_av_pause_white_48dp);
+                views.setContentDescription(R.id.butPlay, getString(R.string.pause_label));
             } else {
-                views.setImageViewResource(R.id.butPlay, R.drawable.ic_play_arrow_white_24dp);
-                if (Build.VERSION.SDK_INT >= 15) {
-                    views.setContentDescription(R.id.butPlay, getString(R.string.play_label));
-                }
+                views.setImageViewResource(R.id.butPlay, R.drawable.ic_av_play_white_48dp);
+                views.setContentDescription(R.id.butPlay, getString(R.string.play_label));
             }
             views.setOnClickPendingIntent(R.id.butPlay, createMediaButtonIntent());
         } else {
@@ -173,13 +166,13 @@ public class PlayerWidgetJobService extends SafeJobIntentService {
 
         if (nothingPlaying) {
             // start the app if they click anything
-            views.setOnClickPendingIntent(R.id.layout_left, startAppPending);
-            views.setOnClickPendingIntent(R.id.butPlay, startAppPending);
+            views.setOnClickPendingIntent(R.id.layout_left, startMediaPlayer);
+            views.setOnClickPendingIntent(R.id.butPlay, startMediaPlayer);
             views.setViewVisibility(R.id.txtvProgress, View.GONE);
             views.setViewVisibility(R.id.txtvTitle, View.GONE);
             views.setViewVisibility(R.id.txtNoPlaying, View.VISIBLE);
-            views.setImageViewResource(R.id.imgvCover, R.mipmap.ic_launcher_foreground);
-            views.setImageViewResource(R.id.butPlay, R.drawable.ic_play_arrow_white_24dp);
+            views.setImageViewResource(R.id.imgvCover, R.mipmap.ic_launcher_round);
+            views.setImageViewResource(R.id.butPlay, R.drawable.ic_av_play_white_48dp);
         }
 
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.JELLY_BEAN) {
@@ -192,6 +185,11 @@ public class PlayerWidgetJobService extends SafeJobIntentService {
                 } else {
                     views.setViewVisibility(R.id.layout_center, View.VISIBLE);
                 }
+
+                SharedPreferences prefs = getSharedPreferences(PlayerWidget.PREFS_NAME, Context.MODE_PRIVATE);
+                int backgroundColor = prefs.getInt(PlayerWidget.KEY_WIDGET_COLOR + id, PlayerWidget.DEFAULT_COLOR);
+                views.setInt(R.id.widgetLayout, "setBackgroundColor", backgroundColor);
+
                 manager.updateAppWidget(id, views);
             }
         } else {
@@ -212,7 +210,7 @@ public class PlayerWidgetJobService extends SafeJobIntentService {
     }
 
     private String getProgressString(int position, int duration, float speed) {
-        if (position > 0 && duration > 0) {
+        if (position >= 0 && duration > 0) {
             TimeSpeedConverter converter = new TimeSpeedConverter(speed);
             position = converter.convert(position);
             duration = converter.convert(duration);
@@ -241,6 +239,5 @@ public class PlayerWidgetJobService extends SafeJobIntentService {
             }
             Log.d(TAG, "Disconnected from service");
         }
-
     };
 }

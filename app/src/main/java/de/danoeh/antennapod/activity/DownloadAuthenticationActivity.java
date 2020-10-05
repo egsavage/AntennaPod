@@ -3,6 +3,8 @@ package de.danoeh.antennapod.activity;
 import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
+
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.AppCompatActivity;
 import android.widget.Button;
@@ -41,12 +43,8 @@ public class DownloadAuthenticationActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        setTheme(UserPreferences.getTheme());
+        setTheme(UserPreferences.getNoTitleTheme());
         super.onCreate(savedInstanceState);
-        ActionBar actionBar = getSupportActionBar();
-        if (actionBar != null) {
-            actionBar.hide();
-        }
 
         setContentView(R.layout.download_authentication_activity);
         TextView txtvDescription = findViewById(R.id.txtvDescription);
@@ -90,7 +88,7 @@ public class DownloadAuthenticationActivity extends AppCompatActivity {
     }
 
     @Override
-    protected void onSaveInstanceState(Bundle outState) {
+    protected void onSaveInstanceState(@NonNull Bundle outState) {
         super.onSaveInstanceState(outState);
         outState.putString("username", etxtUsername.getText().toString());
         outState.putString("password", etxtPassword.getText().toString());

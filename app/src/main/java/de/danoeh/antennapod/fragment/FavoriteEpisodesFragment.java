@@ -10,12 +10,13 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 
+import de.danoeh.antennapod.activity.MainActivity;
+import de.danoeh.antennapod.view.viewholder.EpisodeItemViewHolder;
 import org.greenrobot.eventbus.Subscribe;
 
 import java.util.List;
 
 import de.danoeh.antennapod.R;
-import de.danoeh.antennapod.adapter.AllEpisodesRecycleAdapter;
 import de.danoeh.antennapod.core.event.FavoritesEvent;
 import de.danoeh.antennapod.core.feed.FeedItem;
 import de.danoeh.antennapod.core.storage.DBReader;
@@ -29,11 +30,6 @@ public class FavoriteEpisodesFragment extends EpisodesListFragment {
 
     private static final String TAG = "FavoriteEpisodesFrag";
     private static final String PREF_NAME = "PrefFavoriteEpisodesFragment";
-
-    @Override
-    protected boolean showOnlyNewEpisodes() {
-        return true;
-    }
 
     @Override
     protected String getPrefName() {
@@ -54,16 +50,19 @@ public class FavoriteEpisodesFragment extends EpisodesListFragment {
         emptyView.setTitle(R.string.no_fav_episodes_head_label);
         emptyView.setMessage(R.string.no_fav_episodes_label);
 
-        ItemTouchHelper.SimpleCallback simpleItemTouchCallback = new ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT | ItemTouchHelper.RIGHT) {
+        ItemTouchHelper.SimpleCallback simpleItemTouchCallback = new ItemTouchHelper.SimpleCallback(0,
+                ItemTouchHelper.LEFT) {
             @Override
-            public boolean onMove(RecyclerView recyclerView, RecyclerView.ViewHolder viewHolder, RecyclerView.ViewHolder target) {
+            public boolean onMove(@NonNull RecyclerView recyclerView,
+                                  @NonNull RecyclerView.ViewHolder viewHolder,
+                                  @NonNull RecyclerView.ViewHolder target) {
                 return false;
             }
 
             @Override
-            public void onSwiped(RecyclerView.ViewHolder viewHolder, int swipeDir) {
-                AllEpisodesRecycleAdapter.Holder holder = (AllEpisodesRecycleAdapter.Holder) viewHolder;
-                Log.d(TAG, String.format("remove(%s)", holder.getItemId()));
+            public void onSwiped(@NonNull RecyclerView.ViewHolder viewHolder, int swipeDir) {
+                EpisodeItemViewHolder holder = (EpisodeItemViewHolder) viewHolder;
+                Log.d(TAG, String.format("remove(%s)", holder.getFeedItem().getId()));
 
                 if (disposable != null) {
                     disposable.dispose();
@@ -72,9 +71,8 @@ public class FavoriteEpisodesFragment extends EpisodesListFragment {
                 if (item != null) {
                     DBWriter.removeFavoriteItem(item);
 
-                    Snackbar snackbar = Snackbar.make(root, getString(R.string.removed_item), Snackbar.LENGTH_LONG);
-                    snackbar.setAction(getString(R.string.undo), v -> DBWriter.addFavoriteItem(item));
-                    snackbar.show();
+                    ((MainActivity) getActivity()).showSnackbarAbovePlayer(R.string.removed_item, Snackbar.LENGTH_LONG)
+                        .setAction(getString(R.string.undo), v -> DBWriter.addFavoriteItem(item));
                 }
             }
         };
@@ -87,6 +85,12 @@ public class FavoriteEpisodesFragment extends EpisodesListFragment {
     @NonNull
     @Override
     protected List<FeedItem> loadData() {
-        return DBReader.getFavoriteItemsList();
+        return DBReader.getFavoriteItemsList(0, page * EPISODES_PER_PAGE);
+    }
+
+    @NonNull
+    @Override
+    protected List<FeedItem> loadMoreData() {
+        return DBReader.getFavoriteItemsList((page - 1) * EPISODES_PER_PAGE, EPISODES_PER_PAGE);
     }
 }

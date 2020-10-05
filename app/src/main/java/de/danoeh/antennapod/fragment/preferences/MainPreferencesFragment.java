@@ -7,10 +7,10 @@ import androidx.preference.PreferenceFragmentCompat;
 import com.bytehamster.lib.preferencesearch.SearchConfiguration;
 import com.bytehamster.lib.preferencesearch.SearchPreference;
 import de.danoeh.antennapod.R;
-import de.danoeh.antennapod.activity.AboutActivity;
 import de.danoeh.antennapod.activity.BugReportActivity;
 import de.danoeh.antennapod.activity.PreferenceActivity;
 import de.danoeh.antennapod.core.util.IntentUtils;
+import de.danoeh.antennapod.fragment.preferences.about.AboutFragment;
 
 public class MainPreferencesFragment extends PreferenceFragmentCompat {
     private static final String TAG = "MainPreferencesFragment";
@@ -18,11 +18,12 @@ public class MainPreferencesFragment extends PreferenceFragmentCompat {
     private static final String PREF_SCREEN_USER_INTERFACE = "prefScreenInterface";
     private static final String PREF_SCREEN_PLAYBACK = "prefScreenPlayback";
     private static final String PREF_SCREEN_NETWORK = "prefScreenNetwork";
-    private static final String PREF_SCREEN_INTEGRATIONS = "prefScreenIntegrations";
+    private static final String PREF_SCREEN_GPODDER = "prefScreenGpodder";
     private static final String PREF_SCREEN_STORAGE = "prefScreenStorage";
     private static final String PREF_FAQ = "prefFaq";
-    private static final String PREF_VIEW_MAILING_LIST = "prefViewMailingList";
+    private static final String PREF_VIEW_FORUM = "prefViewForum";
     private static final String PREF_SEND_BUG_REPORT = "prefSendBugReport";
+    private static final String PREF_CATEGORY_PROJECT = "project";
     private static final String STATISTICS = "statistics";
     private static final String PREF_ABOUT = "prefAbout";
 
@@ -31,6 +32,13 @@ public class MainPreferencesFragment extends PreferenceFragmentCompat {
         addPreferencesFromResource(R.xml.preferences);
         setupMainScreen();
         setupSearch();
+
+        // If you are writing a spin-off, please update the details on screens like "About" and "Report bug"
+        // and afterwards remove the following lines.
+        String packageName = getContext().getPackageName();
+        if (!"de.danoeh.antennapod".equals(packageName) && !"de.danoeh.antennapod.debug".equals(packageName)) {
+            findPreference(PREF_CATEGORY_PROJECT).setVisible(false);
+        }
     }
 
     @Override
@@ -52,8 +60,8 @@ public class MainPreferencesFragment extends PreferenceFragmentCompat {
             ((PreferenceActivity) getActivity()).openScreen(R.xml.preferences_network);
             return true;
         });
-        findPreference(PREF_SCREEN_INTEGRATIONS).setOnPreferenceClickListener(preference -> {
-            ((PreferenceActivity) getActivity()).openScreen(R.xml.preferences_integrations);
+        findPreference(PREF_SCREEN_GPODDER).setOnPreferenceClickListener(preference -> {
+            ((PreferenceActivity) getActivity()).openScreen(R.xml.preferences_gpodder);
             return true;
         });
         findPreference(PREF_SCREEN_STORAGE).setOnPreferenceClickListener(preference -> {
@@ -63,13 +71,14 @@ public class MainPreferencesFragment extends PreferenceFragmentCompat {
 
         findPreference(PREF_ABOUT).setOnPreferenceClickListener(
                 preference -> {
-                    startActivity(new Intent(getActivity(), AboutActivity.class));
+                    getParentFragmentManager().beginTransaction().replace(R.id.content, new AboutFragment())
+                            .addToBackStack(getString(R.string.about_pref)).commit();
                     return true;
                 }
         );
         findPreference(STATISTICS).setOnPreferenceClickListener(
                 preference -> {
-                    getFragmentManager().beginTransaction().replace(R.id.content, new StatisticsFragment())
+                    getParentFragmentManager().beginTransaction().replace(R.id.content, new StatisticsFragment())
                             .addToBackStack(getString(R.string.statistics_label)).commit();
                     return true;
                 }
@@ -78,8 +87,8 @@ public class MainPreferencesFragment extends PreferenceFragmentCompat {
             IntentUtils.openInBrowser(getContext(), "https://antennapod.org/faq.html");
             return true;
         });
-        findPreference(PREF_VIEW_MAILING_LIST).setOnPreferenceClickListener(preference -> {
-            IntentUtils.openInBrowser(getContext(), "https://groups.google.com/forum/#!forum/antennapod");
+        findPreference(PREF_VIEW_FORUM).setOnPreferenceClickListener(preference -> {
+            IntentUtils.openInBrowser(getContext(), "https://forum.antennapod.org/");
             return true;
         });
         findPreference(PREF_SEND_BUG_REPORT).setOnPreferenceClickListener(preference -> {
@@ -89,7 +98,7 @@ public class MainPreferencesFragment extends PreferenceFragmentCompat {
     }
 
     private void setupSearch() {
-        SearchPreference searchPreference = (SearchPreference) findPreference("searchPreference");
+        SearchPreference searchPreference = findPreference("searchPreference");
         SearchConfiguration config = searchPreference.getSearchConfiguration();
         config.setActivity((AppCompatActivity) getActivity());
         config.setFragmentContainerViewId(R.id.content);
@@ -103,12 +112,14 @@ public class MainPreferencesFragment extends PreferenceFragmentCompat {
                 .addBreadcrumb(PreferenceActivity.getTitleOfPage(R.xml.preferences_network));
         config.index(R.xml.preferences_storage)
                 .addBreadcrumb(PreferenceActivity.getTitleOfPage(R.xml.preferences_storage));
+        config.index(R.xml.preferences_import_export)
+                .addBreadcrumb(PreferenceActivity.getTitleOfPage(R.xml.preferences_storage))
+                .addBreadcrumb(PreferenceActivity.getTitleOfPage(R.xml.preferences_import_export));
         config.index(R.xml.preferences_autodownload)
                 .addBreadcrumb(PreferenceActivity.getTitleOfPage(R.xml.preferences_network))
                 .addBreadcrumb(R.string.automation)
                 .addBreadcrumb(PreferenceActivity.getTitleOfPage(R.xml.preferences_autodownload));
         config.index(R.xml.preferences_gpodder)
-                .addBreadcrumb(PreferenceActivity.getTitleOfPage(R.xml.preferences_integrations))
                 .addBreadcrumb(PreferenceActivity.getTitleOfPage(R.xml.preferences_gpodder));
     }
 }

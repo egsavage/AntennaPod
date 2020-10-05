@@ -12,9 +12,9 @@ import de.danoeh.antennapod.core.preferences.UserPreferences;
 import de.danoeh.antennapod.core.storage.DBWriter;
 import de.danoeh.antennapod.core.storage.DownloadRequester;
 
-class CancelDownloadActionButton extends ItemActionButton {
+public class CancelDownloadActionButton extends ItemActionButton {
 
-    CancelDownloadActionButton(FeedItem item) {
+    public CancelDownloadActionButton(FeedItem item) {
         super(item);
     }
 
@@ -37,8 +37,6 @@ class CancelDownloadActionButton extends ItemActionButton {
         if (UserPreferences.isEnableAutodownload()) {
             DBWriter.setFeedItemAutoDownload(media.getItem(), false);
             Toast.makeText(context, R.string.download_canceled_autodownload_enabled_msg, Toast.LENGTH_LONG).show();
-        } else {
-            Toast.makeText(context, R.string.download_canceled_msg, Toast.LENGTH_LONG).show();
         }
     }
 }

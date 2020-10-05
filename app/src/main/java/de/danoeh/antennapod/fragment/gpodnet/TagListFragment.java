@@ -13,19 +13,18 @@ import android.view.MenuItem;
 import android.view.View;
 import android.widget.TextView;
 
-import java.util.List;
-
 import de.danoeh.antennapod.R;
 import de.danoeh.antennapod.activity.MainActivity;
 import de.danoeh.antennapod.adapter.gpodnet.TagListAdapter;
-import de.danoeh.antennapod.core.gpoddernet.GpodnetService;
-import de.danoeh.antennapod.core.gpoddernet.GpodnetServiceException;
-import de.danoeh.antennapod.core.gpoddernet.model.GpodnetTag;
-import de.danoeh.antennapod.menuhandler.MenuItemUtils;
+import de.danoeh.antennapod.core.preferences.GpodnetPreferences;
+import de.danoeh.antennapod.core.service.download.AntennapodHttpClient;
+import de.danoeh.antennapod.core.sync.gpoddernet.GpodnetService;
+import de.danoeh.antennapod.core.sync.gpoddernet.GpodnetServiceException;
+import de.danoeh.antennapod.core.sync.gpoddernet.model.GpodnetTag;
+
+import java.util.List;
 
 public class TagListFragment extends ListFragment {
-
-    private static final String TAG = "TagListFragment";
     private static final int COUNT = 50;
 
     @Override
@@ -39,8 +38,7 @@ public class TagListFragment extends ListFragment {
         super.onCreateOptionsMenu(menu, inflater);
         inflater.inflate(R.menu.gpodder_podcasts, menu);
         MenuItem searchItem = menu.findItem(R.id.action_search);
-        final SearchView sv = (SearchView) MenuItemCompat.getActionView(searchItem);
-        MenuItemUtils.adjustTextColor(getActivity(), sv);
+        final SearchView sv = (SearchView) searchItem.getActionView();
         sv.setQueryHint(getString(R.string.gpodnet_search_hint));
         sv.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
             @Override
@@ -74,12 +72,6 @@ public class TagListFragment extends ListFragment {
     }
 
     @Override
-    public void onResume() {
-        super.onResume();
-        ((MainActivity) getActivity()).getSupportActionBar().setTitle(R.string.add_feed_label);
-    }
-
-    @Override
     public void onDestroyView() {
         super.onDestroyView();
         cancelLoadTask();
@@ -100,15 +92,14 @@ public class TagListFragment extends ListFragment {
 
             @Override
             protected List<GpodnetTag> doInBackground(Void... params) {
-                GpodnetService service = new GpodnetService();
+                GpodnetService service = new GpodnetService(AntennapodHttpClient.getHttpClient(),
+                        GpodnetPreferences.getHostname());
                 try {
                     return service.getTopTags(COUNT);
                 } catch (GpodnetServiceException e) {
                     e.printStackTrace();
                     exception = e;
                     return null;
-                } finally {
-                    service.shutdown();
                 }
             }
 

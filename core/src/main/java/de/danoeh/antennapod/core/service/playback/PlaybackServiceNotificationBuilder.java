@@ -24,10 +24,12 @@ import de.danoeh.antennapod.core.glide.ApGlideSettings;
 import de.danoeh.antennapod.core.preferences.UserPreferences;
 import de.danoeh.antennapod.core.receiver.MediaButtonReceiver;
 import de.danoeh.antennapod.core.util.Converter;
-import de.danoeh.antennapod.core.util.IntList;
+import de.danoeh.antennapod.core.feed.util.ImageResourceUtils;
 import de.danoeh.antennapod.core.util.TimeSpeedConverter;
 import de.danoeh.antennapod.core.util.gui.NotificationUtils;
 import de.danoeh.antennapod.core.util.playback.Playable;
+import java.util.ArrayList;
+import org.apache.commons.lang3.ArrayUtils;
 
 public class PlaybackServiceNotificationBuilder {
     private static final String TAG = "PlaybackSrvNotification";
@@ -45,16 +47,11 @@ public class PlaybackServiceNotificationBuilder {
         this.context = context;
     }
 
-    public void setMetadata(Playable playable, MediaSessionCompat.Token mediaSessionToken,
-                            PlayerStatus playerStatus, boolean isCasting) {
-
+    public void setPlayable(Playable playable) {
         if (playable != this.playable) {
             clearCache();
         }
         this.playable = playable;
-        this.mediaSessionToken = mediaSessionToken;
-        this.playerStatus = playerStatus;
-        this.isCasting = isCasting;
     }
 
     private void clearCache() {
@@ -62,7 +59,7 @@ public class PlaybackServiceNotificationBuilder {
         this.position = null;
     }
 
-    public void updatePosition(int position,float speed) {
+    public void updatePosition(int position, float speed) {
         TimeSpeedConverter converter = new TimeSpeedConverter(speed);
         this.position = Converter.getDurationStringLong(converter.convert(position));
     }
@@ -76,7 +73,7 @@ public class PlaybackServiceNotificationBuilder {
         try {
             icon = Glide.with(context)
                     .asBitmap()
-                    .load(playable.getImageLocation())
+                    .load(ImageResourceUtils.getImageLocation(playable))
                     .apply(RequestOptions.diskCacheStrategyOf(ApGlideSettings.AP_DISK_CACHE_STRATEGY))
                     .apply(new RequestOptions().centerCrop())
                     .submit(iconSize, iconSize)
@@ -88,7 +85,7 @@ public class PlaybackServiceNotificationBuilder {
 
     private Bitmap getDefaultIcon() {
         if (defaultIcon == null) {
-            defaultIcon = getBitmap(context, R.drawable.notification_default_large_icon);
+            defaultIcon = getBitmap(context, R.mipmap.ic_launcher);
         }
         return defaultIcon;
     }
@@ -134,12 +131,12 @@ public class PlaybackServiceNotificationBuilder {
             }
         } else {
             notification.setContentTitle(context.getString(R.string.app_name));
-            notification.setContentText("Service is running");
+            notification.setContentText("Loading. If this does not go away, play any episode and contact us.");
         }
 
         notification.setContentIntent(getPlayerActivityPendingIntent());
         notification.setWhen(0);
-        notification.setSmallIcon(R.drawable.ic_antenna);
+        notification.setSmallIcon(R.drawable.ic_notification);
         notification.setOngoing(false);
         notification.setOnlyAlertOnce(true);
         notification.setPriority(UserPreferences.getNotifyPriority());
@@ -149,13 +146,13 @@ public class PlaybackServiceNotificationBuilder {
     }
 
     private PendingIntent getPlayerActivityPendingIntent() {
-        return PendingIntent.getActivity(context, 0, PlaybackService.getPlayerActivityIntent(context),
-                PendingIntent.FLAG_UPDATE_CURRENT);
+        return PendingIntent.getActivity(context, R.id.pending_intent_player_activity,
+                PlaybackService.getPlayerActivityIntent(context), PendingIntent.FLAG_UPDATE_CURRENT);
     }
 
     private void addActions(NotificationCompat.Builder notification, MediaSessionCompat.Token mediaSessionToken,
                             PlayerStatus playerStatus, boolean isCasting) {
-        IntList compactActionList = new IntList();
+        ArrayList<Integer> compactActionList = new ArrayList<>();
 
         int numActions = 0; // we start and 0 and then increment by 1 for each call to addAction
 
@@ -186,15 +183,14 @@ public class PlaybackServiceNotificationBuilder {
             notification.addAction(R.drawable.ic_notification_pause, //pause action
                     context.getString(R.string.pause_label),
                     pauseButtonPendingIntent);
-            compactActionList.add(numActions++);
         } else {
             PendingIntent playButtonPendingIntent = getPendingIntentForMediaAction(
                     KeyEvent.KEYCODE_MEDIA_PLAY, numActions);
             notification.addAction(R.drawable.ic_notification_play, //play action
                     context.getString(R.string.play_label),
                     playButtonPendingIntent);
-            compactActionList.add(numActions++);
         }
+        compactActionList.add(numActions++);
 
         // ff follows play, then we have skip (if it's present)
         PendingIntent ffButtonPendingIntent = getPendingIntentForMediaAction(
@@ -222,7 +218,7 @@ public class PlaybackServiceNotificationBuilder {
                 KeyEvent.KEYCODE_MEDIA_STOP, numActions);
         notification.setStyle(new androidx.media.app.NotificationCompat.MediaStyle()
                 .setMediaSession(mediaSessionToken)
-                .setShowActionsInCompactView(compactActionList.toArray())
+                .setShowActionsInCompactView(ArrayUtils.toPrimitive(compactActionList.toArray(new Integer[0])))
                 .setShowCancelButton(true)
                 .setCancelButtonIntent(stopButtonPendingIntent));
     }
@@ -237,5 +233,21 @@ public class PlaybackServiceNotificationBuilder {
         } else {
             return PendingIntent.getService(context, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT);
         }
+    }
+
+    public void setMediaSessionToken(MediaSessionCompat.Token mediaSessionToken) {
+        this.mediaSessionToken = mediaSessionToken;
+    }
+
+    public void setPlayerStatus(PlayerStatus playerStatus) {
+        this.playerStatus = playerStatus;
+    }
+
+    public void setCasting(boolean casting) {
+        isCasting = casting;
+    }
+
+    public PlayerStatus getPlayerStatus() {
+        return playerStatus;
     }
 }

@@ -3,6 +3,7 @@ package de.danoeh.antennapod.core.syndication.namespace.atom;
 import android.text.TextUtils;
 import android.util.Log;
 
+import de.danoeh.antennapod.core.syndication.util.SyndStringUtils;
 import org.xml.sax.Attributes;
 
 import de.danoeh.antennapod.core.feed.FeedItem;
@@ -97,11 +98,9 @@ public class NSAtom extends Namespace {
                         type = SyndTypeUtils.getMimeTypeFromUrl(href);
                     }
 
-                    if(SyndTypeUtils.enclosureTypeValid(type)) {
-                        FeedItem currItem = state.getCurrentItem();
-                        if(currItem != null && !currItem.hasMedia()) {
-                            currItem.setMedia(new FeedMedia(currItem, href, size, type));
-                        }
+                    FeedItem currItem = state.getCurrentItem();
+                    if (SyndTypeUtils.enclosureTypeValid(type) && currItem != null && !currItem.hasMedia()) {
+                        currItem.setMedia(new FeedMedia(currItem, href, size, type));
                     }
                 } else if (LINK_REL_PAYMENT.equals(rel)) {
                     state.getCurrentItem().setPaymentLink(href);
@@ -111,9 +110,9 @@ public class NSAtom extends Namespace {
                     String type = attributes.getValue(LINK_TYPE);
                     /*
                      * Use as link if a) no type-attribute is given and
-					 * feed-object has no link yet b) type of link is
-					 * LINK_TYPE_HTML or LINK_TYPE_XHTML
-					 */
+                     * feed-object has no link yet b) type of link is
+                     * LINK_TYPE_HTML or LINK_TYPE_XHTML
+                     */
                     if (state.getFeed() != null &&
                         ((type == null && state.getFeed().getLink() == null) ||
                             (LINK_TYPE_HTML.equals(type) || LINK_TYPE_XHTML.equals(type)))) {
@@ -165,12 +164,13 @@ public class NSAtom extends Namespace {
 
         if (state.getTagstack().size() >= 2) {
             AtomText textElement = null;
-            String content;
+            String contentRaw;
             if (state.getContentBuf() != null) {
-                content = state.getContentBuf().toString();
+                contentRaw = state.getContentBuf().toString();
             } else {
-                content = "";
+                contentRaw = "";
             }
+            String content = SyndStringUtils.trimAllWhitespace(contentRaw);
             SyndElement topElement = state.getTagstack().peek();
             String top = topElement.getName();
             SyndElement secondElement = state.getSecondTag();
@@ -183,9 +183,9 @@ public class NSAtom extends Namespace {
 
             if (ID.equals(top)) {
                 if (FEED.equals(second) && state.getFeed() != null) {
-                    state.getFeed().setFeedIdentifier(content);
+                    state.getFeed().setFeedIdentifier(contentRaw);
                 } else if (ENTRY.equals(second) && state.getCurrentItem() != null) {
-                    state.getCurrentItem().setItemIdentifier(content);
+                    state.getCurrentItem().setItemIdentifier(contentRaw);
                 }
             } else if (TITLE.equals(top) && textElement != null) {
                 if (FEED.equals(second) && state.getFeed() != null) {

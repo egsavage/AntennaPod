@@ -44,8 +44,8 @@ class DBTestUtils {
         PodDBAdapter adapter = PodDBAdapter.getInstance();
         adapter.open();
         for (int i = 0; i < numFeeds; i++) {
-            Feed f = new Feed(0, null, "feed " + i, null, "link" + i, "descr", null, null,
-                    null, null, "id" + i, null, null, "url" + i, false, false, null, null, false);
+            Feed f = new Feed(0, null, "feed " + i, "link" + i, "descr", null, null,
+                    null, null, "id" + i, null, null, "url" + i, false);
             f.setItems(new ArrayList<>());
             for (int j = 0; j < numItems; j++) {
                 FeedItem item = new FeedItem(0, "item " + j, "id" + j, "link" + j, new Date(),
@@ -58,7 +58,8 @@ class DBTestUtils {
                     List<Chapter> chapters = new ArrayList<>();
                     item.setChapters(chapters);
                     for (int k = 0; k < numChapters; k++) {
-                        chapters.add(new SimpleChapter(k, "item " + j + " chapter " + k, item, "http://example.com"));
+                        chapters.add(new SimpleChapter(k, "item " + j + " chapter " + k,
+                                "http://example.com", "http://example.com/image.png"));
                     }
                 }
                 f.getItems().add(item);

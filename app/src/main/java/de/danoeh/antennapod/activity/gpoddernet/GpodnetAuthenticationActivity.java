@@ -30,12 +30,13 @@ import java.util.regex.Pattern;
 import de.danoeh.antennapod.BuildConfig;
 import de.danoeh.antennapod.R;
 import de.danoeh.antennapod.activity.MainActivity;
-import de.danoeh.antennapod.core.gpoddernet.GpodnetService;
-import de.danoeh.antennapod.core.gpoddernet.GpodnetServiceException;
-import de.danoeh.antennapod.core.gpoddernet.model.GpodnetDevice;
 import de.danoeh.antennapod.core.preferences.GpodnetPreferences;
 import de.danoeh.antennapod.core.preferences.UserPreferences;
-import de.danoeh.antennapod.core.service.GpodnetSyncService;
+import de.danoeh.antennapod.core.service.download.AntennapodHttpClient;
+import de.danoeh.antennapod.core.sync.SyncService;
+import de.danoeh.antennapod.core.sync.gpoddernet.GpodnetService;
+import de.danoeh.antennapod.core.sync.gpoddernet.GpodnetServiceException;
+import de.danoeh.antennapod.core.sync.gpoddernet.model.GpodnetDevice;
 
 /**
  * Guides the user through the authentication process
@@ -69,7 +70,7 @@ public class GpodnetAuthenticationActivity extends AppCompatActivity {
         getSupportActionBar().setDisplayHomeAsUpEnabled(true);
 
         setContentView(R.layout.gpodnetauth_activity);
-        service = new GpodnetService();
+        service = new GpodnetService(AntennapodHttpClient.getHttpClient(), GpodnetPreferences.getHostname());
 
         viewFlipper = findViewById(R.id.viewflipper);
         LayoutInflater inflater = (LayoutInflater)
@@ -86,19 +87,10 @@ public class GpodnetAuthenticationActivity extends AppCompatActivity {
     }
 
     @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        if (service != null) {
-            service.shutdown();
-        }
-    }
-
-    @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        switch (item.getItemId()) {
-            case android.R.id.home:
-                finish();
-                return true;
+        if (item.getItemId() == android.R.id.home) {
+            finish();
+            return true;
         }
         return super.onOptionsItemSelected(item);
     }
@@ -190,8 +182,6 @@ public class GpodnetAuthenticationActivity extends AppCompatActivity {
         final AtomicReference<List<GpodnetDevice>> devices = new AtomicReference<>();
         new AsyncTask<GpodnetService, Void, List<GpodnetDevice>>() {
 
-            private volatile Exception exception;
-
             @Override
             protected void onPreExecute() {
                 super.onPreExecute();
@@ -223,10 +213,9 @@ public class GpodnetAuthenticationActivity extends AppCompatActivity {
             @Override
             protected List<GpodnetDevice> doInBackground(GpodnetService... params) {
                 try {
-                    return params[0].getDevices(username);
+                    return params[0].getDevices();
                 } catch (GpodnetServiceException e) {
                     e.printStackTrace();
-                    exception = e;
                     return null;
                 }
             }
@@ -271,7 +260,7 @@ public class GpodnetAuthenticationActivity extends AppCompatActivity {
                         @Override
                         protected GpodnetDevice doInBackground(GpodnetService... params) {
                             try {
-                                params[0].configureDevice(username, deviceStr, captionStr, GpodnetDevice.DeviceType.MOBILE);
+                                params[0].configureDevice(deviceStr, captionStr, GpodnetDevice.DeviceType.MOBILE);
                                 return new GpodnetDevice(deviceStr, captionStr, GpodnetDevice.DeviceType.MOBILE.toString(), 0);
                             } catch (GpodnetServiceException e) {
                                 e.printStackTrace();
@@ -352,8 +341,8 @@ public class GpodnetAuthenticationActivity extends AppCompatActivity {
         final Button back = view.findViewById(R.id.butGoMainscreen);
 
         sync.setOnClickListener(v -> {
-            GpodnetSyncService.sendSyncIntent(GpodnetAuthenticationActivity.this);
             finish();
+            SyncService.sync(getApplicationContext());
         });
         back.setOnClickListener(v -> {
             Intent intent = new Intent(GpodnetAuthenticationActivity.this, MainActivity.class);

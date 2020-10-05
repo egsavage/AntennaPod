@@ -1,10 +1,7 @@
 package de.danoeh.antennapod.fragment;
 
 import android.content.Intent;
-import android.os.Build;
 import android.os.Bundle;
-import androidx.core.app.ActivityOptionsCompat;
-import androidx.fragment.app.Fragment;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -13,13 +10,15 @@ import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
-
+import androidx.fragment.app.Fragment;
 import com.bumptech.glide.Glide;
-
 import com.bumptech.glide.request.RequestOptions;
+import com.google.android.material.bottomsheet.BottomSheetBehavior;
 import de.danoeh.antennapod.R;
+import de.danoeh.antennapod.activity.MainActivity;
 import de.danoeh.antennapod.core.event.PlaybackPositionEvent;
 import de.danoeh.antennapod.core.feed.MediaType;
+import de.danoeh.antennapod.core.feed.util.ImageResourceUtils;
 import de.danoeh.antennapod.core.glide.ApGlideSettings;
 import de.danoeh.antennapod.core.service.playback.PlaybackService;
 import de.danoeh.antennapod.core.util.playback.Playable;
@@ -33,18 +32,16 @@ import org.greenrobot.eventbus.Subscribe;
 import org.greenrobot.eventbus.ThreadMode;
 
 /**
- * Fragment which is supposed to be displayed outside of the MediaplayerActivity
- * if the PlaybackService is running
+ * Fragment which is supposed to be displayed outside of the MediaplayerActivity.
  */
 public class ExternalPlayerFragment extends Fragment {
     public static final String TAG = "ExternalPlayerFragment";
 
-    private ViewGroup fragmentLayout;
     private ImageView imgvCover;
     private TextView txtvTitle;
     private ImageButton butPlay;
-    private TextView mFeedName;
-    private ProgressBar mProgressBar;
+    private TextView feedName;
+    private ProgressBar progressBar;
     private PlaybackController controller;
     private Disposable disposable;
 
@@ -55,26 +52,21 @@ public class ExternalPlayerFragment extends Fragment {
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
                              Bundle savedInstanceState) {
-        View root = inflater.inflate(R.layout.external_player_fragment,
-                container, false);
-        fragmentLayout = root.findViewById(R.id.fragmentLayout);
+        View root = inflater.inflate(R.layout.external_player_fragment, container, false);
         imgvCover = root.findViewById(R.id.imgvCover);
         txtvTitle = root.findViewById(R.id.txtvTitle);
         butPlay = root.findViewById(R.id.butPlay);
-        mFeedName = root.findViewById(R.id.txtvAuthor);
-        mProgressBar = root.findViewById(R.id.episodeProgress);
+        feedName = root.findViewById(R.id.txtvAuthor);
+        progressBar = root.findViewById(R.id.episodeProgress);
 
-        fragmentLayout.setOnClickListener(v -> {
+        root.findViewById(R.id.fragmentLayout).setOnClickListener(v -> {
             Log.d(TAG, "layoutInfo was clicked");
 
             if (controller != null && controller.getMedia() != null) {
-                Intent intent = PlaybackService.getPlayerActivityIntent(getActivity(), controller.getMedia());
-
-                if (Build.VERSION.SDK_INT >= 16 && controller.getMedia().getMediaType() == MediaType.AUDIO) {
-                    ActivityOptionsCompat options = ActivityOptionsCompat.
-                            makeSceneTransitionAnimation(getActivity(), imgvCover, "coverTransition");
-                    startActivity(intent, options.toBundle());
+                if (controller.getMedia().getMediaType() == MediaType.AUDIO) {
+                    ((MainActivity) getActivity()).getBottomSheet().setState(BottomSheetBehavior.STATE_EXPANDED);
                 } else {
+                    Intent intent = PlaybackService.getPlayerActivityIntent(getActivity(), controller.getMedia());
                     startActivity(intent);
                 }
             }
@@ -85,7 +77,6 @@ public class ExternalPlayerFragment extends Fragment {
     @Override
     public void onActivityCreated(Bundle savedInstanceState) {
         super.onActivityCreated(savedInstanceState);
-        controller = setupPlaybackController();
         butPlay.setOnClickListener(v -> {
             if (controller != null) {
                 controller.playPause();
@@ -95,7 +86,7 @@ public class ExternalPlayerFragment extends Fragment {
     }
 
     private PlaybackController setupPlaybackController() {
-        return new PlaybackController(getActivity(), true) {
+        return new PlaybackController(getActivity()) {
 
             @Override
             public void onPositionObserverUpdate() {
@@ -119,20 +110,14 @@ public class ExternalPlayerFragment extends Fragment {
 
             @Override
             public void onShutdownNotification() {
-                playbackDone();
+                ((MainActivity) getActivity()).setPlayerVisible(false);
             }
 
             @Override
             public void onPlaybackEnd() {
-                playbackDone();
+                ((MainActivity) getActivity()).setPlayerVisible(false);
             }
         };
-    }
-
-    @Override
-    public void onResume() {
-        super.onResume();
-        onPositionObserverUpdate();
     }
 
     @Override
@@ -176,24 +161,6 @@ public class ExternalPlayerFragment extends Fragment {
         }
     }
 
-    private void playbackDone() {
-        if (fragmentLayout != null) {
-            fragmentLayout.setVisibility(View.GONE);
-        }
-        if (controller != null) {
-            controller.release();
-        }
-        controller = setupPlaybackController();
-        if (butPlay != null) {
-            butPlay.setOnClickListener(v -> {
-                if (controller != null) {
-                    controller.playPause();
-                }
-            });
-        }
-        controller.init();
-    }
-
     private boolean loadMediaInfo() {
         Log.d(TAG, "Loading media info");
         if (controller == null) {
@@ -204,51 +171,42 @@ public class ExternalPlayerFragment extends Fragment {
         if (disposable != null) {
             disposable.dispose();
         }
-        disposable = Maybe.create(emitter -> {
-                    Playable media = controller.getMedia();
-                    if (media != null) {
-                        emitter.onSuccess(media);
-                    } else {
-                        emitter.onComplete();
-                    }
-                })
+        disposable = Maybe.fromCallable(() -> controller.getMedia())
                 .subscribeOn(Schedulers.io())
                 .observeOn(AndroidSchedulers.mainThread())
-                .subscribe(media -> updateUi((Playable) media),
+                .subscribe(this::updateUi,
                         error -> Log.e(TAG, Log.getStackTraceString(error)),
-                        () -> fragmentLayout.setVisibility(View.GONE));
+                        () -> ((MainActivity) getActivity()).setPlayerVisible(false));
         return true;
     }
 
     private void updateUi(Playable media) {
-        if (media != null) {
-            txtvTitle.setText(media.getEpisodeTitle());
-            mFeedName.setText(media.getFeedTitle());
-            onPositionObserverUpdate();
-
-            Glide.with(getActivity())
-                    .load(media.getImageLocation())
-                    .apply(new RequestOptions()
-                        .placeholder(R.color.light_gray)
-                        .error(R.color.light_gray)
-                        .diskCacheStrategy(ApGlideSettings.AP_DISK_CACHE_STRATEGY)
-                        .fitCenter()
-                        .dontAnimate())
-                    .into(imgvCover);
-
-            fragmentLayout.setVisibility(View.VISIBLE);
-            if (controller != null && controller.isPlayingVideoLocally()) {
-                butPlay.setVisibility(View.GONE);
-            } else {
-                butPlay.setVisibility(View.VISIBLE);
-            }
-        } else {
-            Log.w(TAG, "loadMediaInfo was called while the media object of playbackService was null!");
+        if (media == null) {
+            return;
         }
-    }
+        ((MainActivity) getActivity()).setPlayerVisible(true);
+        txtvTitle.setText(media.getEpisodeTitle());
+        feedName.setText(media.getFeedTitle());
+        onPositionObserverUpdate();
 
-    public PlaybackController getPlaybackControllerTestingOnly() {
-        return controller;
+        Glide.with(getActivity())
+                .load(ImageResourceUtils.getImageLocation(media))
+                .apply(new RequestOptions()
+                    .placeholder(R.color.light_gray)
+                    .error(R.color.light_gray)
+                    .diskCacheStrategy(ApGlideSettings.AP_DISK_CACHE_STRATEGY)
+                    .fitCenter()
+                    .dontAnimate())
+                .into(imgvCover);
+
+        if (controller != null && controller.isPlayingVideoLocally()) {
+            butPlay.setVisibility(View.GONE);
+            ((MainActivity) getActivity()).getBottomSheet().setLocked(true);
+            ((MainActivity) getActivity()).getBottomSheet().setState(BottomSheetBehavior.STATE_COLLAPSED);
+        } else {
+            butPlay.setVisibility(View.VISIBLE);
+            ((MainActivity) getActivity()).getBottomSheet().setLocked(false);
+        }
     }
 
     private void onPositionObserverUpdate() {
@@ -258,7 +216,7 @@ public class ExternalPlayerFragment extends Fragment {
                 || controller.getDuration() == PlaybackService.INVALID_TIME) {
             return;
         }
-        mProgressBar.setProgress((int)
+        progressBar.setProgress((int)
                 ((double) controller.getPosition() / controller.getDuration() * 100));
     }
 }

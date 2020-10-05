@@ -1,20 +1,16 @@
 package de.test.antennapod.storage;
 
-import android.content.Context;
-
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Random;
 
-import androidx.test.InstrumentationRegistry;
-import androidx.test.filters.LargeTest;
+import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.filters.SmallTest;
 import de.danoeh.antennapod.core.feed.Feed;
 import de.danoeh.antennapod.core.feed.FeedItem;
 import de.danoeh.antennapod.core.feed.FeedMedia;
 import de.danoeh.antennapod.core.storage.DBReader;
-import de.danoeh.antennapod.core.storage.FeedItemStatistics;
 import de.danoeh.antennapod.core.storage.PodDBAdapter;
 import de.danoeh.antennapod.core.util.LongList;
 import org.junit.After;
@@ -42,7 +38,7 @@ public class DBReaderTest {
     @Before
     public void setUp() throws Exception {
         // create new database
-        PodDBAdapter.init(InstrumentationRegistry.getTargetContext());
+        PodDBAdapter.init(InstrumentationRegistry.getInstrumentation().getTargetContext());
         PodDBAdapter.deleteDatabase();
         PodDBAdapter adapter = PodDBAdapter.getInstance();
         adapter.open();
@@ -56,7 +52,7 @@ public class DBReaderTest {
         assertNotNull(savedFeeds);
         assertEquals(feeds.size(), savedFeeds.size());
         for (int i = 0; i < feeds.size(); i++) {
-            assertTrue(savedFeeds.get(i).getId() == feeds.get(i).getId());
+            assertEquals(feeds.get(i).getId(), savedFeeds.get(i).getId());
         }
     }
 
@@ -95,7 +91,7 @@ public class DBReaderTest {
         List<Feed> feeds = saveFeedlist(10, 0, false);
         List<String> urls = DBReader.getFeedListDownloadUrls();
         assertNotNull(urls);
-        assertTrue(urls.size() == feeds.size());
+        assertEquals(feeds.size(), urls.size());
         for (int i = 0; i < urls.size(); i++) {
             assertEquals(urls.get(i), feeds.get(i).getDownload_url());
         }
@@ -103,7 +99,6 @@ public class DBReaderTest {
 
     @Test
     public void testLoadFeedDataOfFeedItemlist() {
-        final Context context = InstrumentationRegistry.getTargetContext();
         final int numFeeds = 10;
         final int numItems = 1;
         List<Feed> feeds = saveFeedlist(numFeeds, numItems, false);
@@ -120,8 +115,8 @@ public class DBReaderTest {
             for (int j = 0; j < numItems; j++) {
                 FeedItem item = feeds.get(i).getItems().get(j);
                 assertNotNull(item.getFeed());
-                assertTrue(item.getFeed().getId() == feeds.get(i).getId());
-                assertTrue(item.getFeedId() == item.getFeed().getId());
+                assertEquals(feeds.get(i).getId(), item.getFeed().getId());
+                assertEquals(item.getFeed().getId(), item.getFeedId());
             }
         }
     }
@@ -135,9 +130,9 @@ public class DBReaderTest {
         feed.setItems(null);
         List<FeedItem> savedItems = DBReader.getFeedItemList(feed);
         assertNotNull(savedItems);
-        assertTrue(savedItems.size() == items.size());
+        assertEquals(items.size(), savedItems.size());
         for (int i = 0; i < savedItems.size(); i++) {
-            assertTrue(items.get(i).getId() == savedItems.get(i).getId());
+            assertEquals(savedItems.get(i).getId(), items.get(i).getId());
         }
     }
 
@@ -172,10 +167,10 @@ public class DBReaderTest {
         List<FeedItem> queue = saveQueue(numItems);
         LongList ids = DBReader.getQueueIDList();
         assertNotNull(ids);
-        assertTrue(queue.size() == ids.size());
+        assertEquals(ids.size(), queue.size());
         for (int i = 0; i < queue.size(); i++) {
             assertTrue(ids.get(i) != 0);
-            assertTrue(queue.get(i).getId() == ids.get(i));
+            assertEquals(ids.get(i), queue.get(i).getId());
         }
     }
 
@@ -185,10 +180,10 @@ public class DBReaderTest {
         List<FeedItem> queue = saveQueue(numItems);
         List<FeedItem> savedQueue = DBReader.getQueue();
         assertNotNull(savedQueue);
-        assertTrue(queue.size() == savedQueue.size());
+        assertEquals(savedQueue.size(), queue.size());
         for (int i = 0; i < queue.size(); i++) {
             assertTrue(savedQueue.get(i).getId() != 0);
-            assertTrue(queue.get(i).getId() == savedQueue.get(i).getId());
+            assertEquals(savedQueue.get(i).getId(), queue.get(i).getId());
         }
     }
 
@@ -226,7 +221,7 @@ public class DBReaderTest {
         List<FeedItem> downloaded = saveDownloadedItems(numItems);
         List<FeedItem> downloaded_saved = DBReader.getDownloadedItems();
         assertNotNull(downloaded_saved);
-        assertTrue(downloaded_saved.size() == downloaded.size());
+        assertEquals(downloaded.size(), downloaded_saved.size());
         for (FeedItem item : downloaded_saved) {
             assertNotNull(item.getMedia());
             assertTrue(item.getMedia().isDownloaded());
@@ -267,11 +262,11 @@ public class DBReaderTest {
         for (int i = 0; i < newItems.size(); i++) {
             unreadIds[i] = newItems.get(i).getId();
         }
-        List<FeedItem> newItemsSaved = DBReader.getNewItemsList();
+        List<FeedItem> newItemsSaved = DBReader.getNewItemsList(0, Integer.MAX_VALUE);
         assertNotNull(newItemsSaved);
-        assertTrue(newItems.size() == newItemsSaved.size());
-        for(int i=0; i < newItemsSaved.size(); i++) {
-            long savedId = newItemsSaved.get(i).getId();
+        assertEquals(newItemsSaved.size(), newItems.size());
+        for (FeedItem feedItem : newItemsSaved) {
+            long savedId = feedItem.getId();
             boolean found = false;
             for (long id : unreadIds) {
                 if (id == savedId) {
@@ -314,23 +309,10 @@ public class DBReaderTest {
     }
 
     @Test
-    public void testGetFeedStatisticsCheckOrder() {
-        final int NUM_FEEDS = 10;
-        final int NUM_ITEMS = 10;
-        List<Feed> feeds = DBTestUtils.saveFeedlist(NUM_FEEDS, NUM_ITEMS, false);
-        List<FeedItemStatistics> statistics = DBReader.getFeedStatisticsList();
-        assertNotNull(statistics);
-        assertEquals(feeds.size(), statistics.size());
-        for (int i = 0; i < NUM_FEEDS; i++) {
-            assertEquals("Wrong entry at index " + i, feeds.get(i).getId(), statistics.get(i).getFeedID());
-        }
-    }
-
-    @Test
     public void testGetNavDrawerDataQueueEmptyNoUnreadItems() {
         final int NUM_FEEDS = 10;
         final int NUM_ITEMS = 10;
-        List<Feed> feeds = DBTestUtils.saveFeedlist(NUM_FEEDS, NUM_ITEMS, true);
+        DBTestUtils.saveFeedlist(NUM_FEEDS, NUM_ITEMS, true);
         DBReader.NavDrawerData navDrawerData = DBReader.getNavDrawerData();
         assertEquals(NUM_FEEDS, navDrawerData.feeds.size());
         assertEquals(0, navDrawerData.numNewItems);
@@ -368,7 +350,6 @@ public class DBReaderTest {
 
     @Test
     public void testGetFeedItemlistCheckChaptersFalse() throws Exception {
-        Context context = InstrumentationRegistry.getTargetContext();
         List<Feed> feeds = DBTestUtils.saveFeedlist(10, 10, false, false, 0);
         for (Feed feed : feeds) {
             for (FeedItem item : feed.getItems()) {
@@ -423,6 +404,7 @@ public class DBReaderTest {
         List<Feed> feeds = saveFeedlist(1, 1, false, true, NUM_CHAPTERS);
         FeedItem item1 = feeds.get(0).getItems().get(0);
         FeedItem item2 = DBReader.getFeedItem(item1.getId());
+        DBReader.loadChaptersOfFeedItem(item2);
         assertTrue(item2.hasChapters());
         assertEquals(item1.getChapters(), item2.getChapters());
     }

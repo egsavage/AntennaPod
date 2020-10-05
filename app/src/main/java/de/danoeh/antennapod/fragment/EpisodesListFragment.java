@@ -1,16 +1,14 @@
 package de.danoeh.antennapod.fragment;
 
-import android.content.Context;
 import android.content.DialogInterface;
-import android.content.SharedPreferences;
 import android.os.Bundle;
 import androidx.annotation.NonNull;
 import androidx.fragment.app.Fragment;
-import androidx.core.view.MenuItemCompat;
-import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
-import androidx.appcompat.widget.SearchView;
 import androidx.recyclerview.widget.SimpleItemAnimator;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+
+import android.os.Handler;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -22,9 +20,13 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import com.yqritc.recyclerviewflexibledivider.HorizontalDividerItemDecoration;
-
+import de.danoeh.antennapod.adapter.EpisodeItemListAdapter;
+import de.danoeh.antennapod.core.event.FeedListUpdateEvent;
 import de.danoeh.antennapod.core.event.PlaybackPositionEvent;
+import de.danoeh.antennapod.core.event.PlayerStatusEvent;
+import de.danoeh.antennapod.core.event.UnreadItemsUpdateEvent;
+import de.danoeh.antennapod.view.EpisodeItemListRecyclerView;
+import de.danoeh.antennapod.view.viewholder.EpisodeItemViewHolder;
 import org.greenrobot.eventbus.EventBus;
 import org.greenrobot.eventbus.Subscribe;
 import org.greenrobot.eventbus.ThreadMode;
@@ -34,21 +36,15 @@ import java.util.List;
 
 import de.danoeh.antennapod.R;
 import de.danoeh.antennapod.activity.MainActivity;
-import de.danoeh.antennapod.adapter.AllEpisodesRecycleAdapter;
 import de.danoeh.antennapod.core.dialog.ConfirmationDialog;
 import de.danoeh.antennapod.core.event.DownloadEvent;
 import de.danoeh.antennapod.core.event.DownloaderUpdate;
 import de.danoeh.antennapod.core.event.FeedItemEvent;
-import de.danoeh.antennapod.core.feed.EventDistributor;
 import de.danoeh.antennapod.core.feed.FeedItem;
-import de.danoeh.antennapod.core.feed.FeedMedia;
-import de.danoeh.antennapod.core.service.download.DownloadRequest;
 import de.danoeh.antennapod.core.service.download.DownloadService;
-import de.danoeh.antennapod.core.service.download.Downloader;
 import de.danoeh.antennapod.core.storage.DBWriter;
 import de.danoeh.antennapod.core.storage.DownloadRequester;
 import de.danoeh.antennapod.core.util.FeedItemUtil;
-import de.danoeh.antennapod.core.util.LongList;
 import de.danoeh.antennapod.core.util.download.AutoUpdateManager;
 import de.danoeh.antennapod.menuhandler.FeedItemMenuHandler;
 import de.danoeh.antennapod.menuhandler.MenuItemUtils;
@@ -64,45 +60,32 @@ import io.reactivex.schedulers.Schedulers;
 public abstract class EpisodesListFragment extends Fragment {
 
     public static final String TAG = "EpisodesListFragment";
+    protected static final int EPISODES_PER_PAGE = 150;
+    protected int page = 1;
+    protected boolean isLoadingMore = false;
+    protected boolean hasMoreItems = true;
 
-    private static final int EVENTS = EventDistributor.FEED_LIST_UPDATE |
-            EventDistributor.UNREAD_ITEMS_UPDATE |
-            EventDistributor.PLAYER_STATUS_UPDATE;
-
-    private static final String DEFAULT_PREF_NAME = "PrefAllEpisodesFragment";
-    private static final String PREF_SCROLL_POSITION = "scroll_position";
-    private static final String PREF_SCROLL_OFFSET = "scroll_offset";
-
-    RecyclerView recyclerView;
-    AllEpisodesRecycleAdapter listAdapter;
+    EpisodeItemListRecyclerView recyclerView;
+    EpisodeItemListAdapter listAdapter;
     ProgressBar progLoading;
+    View loadingMoreView;
     EmptyViewHandler emptyView;
 
     @NonNull
     List<FeedItem> episodes = new ArrayList<>();
-    @NonNull
-    private List<Downloader> downloaderList = new ArrayList<>();
 
-    private boolean isUpdatingFeeds;
-    boolean isMenuInvalidationAllowed = false;
-
+    private volatile boolean isUpdatingFeeds;
+    private boolean isMenuVisible = true;
     protected Disposable disposable;
-    private LinearLayoutManager layoutManager;
     protected TextView txtvInformation;
 
-    boolean showOnlyNewEpisodes() {
-        return false;
-    }
-
     String getPrefName() {
-        return DEFAULT_PREF_NAME;
+        return TAG;
     }
 
     @Override
     public void onStart() {
         super.onStart();
-        setHasOptionsMenu(true);
-        EventDistributor.getInstance().register(contentUpdate);
         EventBus.getDefault().register(this);
         loadItems();
     }
@@ -110,13 +93,14 @@ public abstract class EpisodesListFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
+        setHasOptionsMenu(true);
         registerForContextMenu(recyclerView);
     }
 
     @Override
     public void onPause() {
         super.onPause();
-        saveScrollPosition();
+        recyclerView.saveScrollPosition(getPrefName());
         unregisterForContextMenu(recyclerView);
     }
 
@@ -124,40 +108,8 @@ public abstract class EpisodesListFragment extends Fragment {
     public void onStop() {
         super.onStop();
         EventBus.getDefault().unregister(this);
-        EventDistributor.getInstance().unregister(contentUpdate);
         if (disposable != null) {
             disposable.dispose();
-        }
-    }
-
-    private void saveScrollPosition() {
-        int firstItem = layoutManager.findFirstVisibleItemPosition();
-        View firstItemView = layoutManager.findViewByPosition(firstItem);
-        float topOffset;
-        if (firstItemView == null) {
-            topOffset = 0;
-        } else {
-            topOffset = firstItemView.getTop();
-        }
-
-        SharedPreferences prefs = getActivity().getSharedPreferences(getPrefName(), Context.MODE_PRIVATE);
-        SharedPreferences.Editor editor = prefs.edit();
-        editor.putInt(PREF_SCROLL_POSITION, firstItem);
-        editor.putFloat(PREF_SCROLL_OFFSET, topOffset);
-        editor.apply();
-    }
-
-    private void restoreScrollPosition() {
-        SharedPreferences prefs = getActivity().getSharedPreferences(getPrefName(), Context.MODE_PRIVATE);
-        int position = prefs.getInt(PREF_SCROLL_POSITION, 0);
-        float offset = prefs.getFloat(PREF_SCROLL_OFFSET, 0.0f);
-        if (position > 0 || offset > 0) {
-            layoutManager.scrollToPositionWithOffset(position, (int) offset);
-            // restore once, then forget
-            SharedPreferences.Editor editor = prefs.edit();
-            editor.putInt(PREF_SCROLL_POSITION, 0);
-            editor.putFloat(PREF_SCROLL_OFFSET, 0.0f);
-            editor.apply();
         }
     }
 
@@ -165,35 +117,24 @@ public abstract class EpisodesListFragment extends Fragment {
             () -> DownloadService.isRunning && DownloadRequester.getInstance().isDownloadingFeeds();
 
     @Override
-    public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
+    public void setMenuVisibility(final boolean visible) {
+        super.setMenuVisibility(visible);
+        isMenuVisible = visible;
+    }
+
+    @Override
+    public void onCreateOptionsMenu(@NonNull Menu menu, @NonNull MenuInflater inflater) {
         if (!isAdded()) {
             return;
         }
         super.onCreateOptionsMenu(menu, inflater);
         inflater.inflate(R.menu.episodes, menu);
-
-        MenuItem searchItem = menu.findItem(R.id.action_search);
-        final SearchView sv = (SearchView) MenuItemCompat.getActionView(searchItem);
-        MenuItemUtils.adjustTextColor(getActivity(), sv);
-        sv.setQueryHint(getString(R.string.search_hint));
-        sv.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
-            @Override
-            public boolean onQueryTextSubmit(String s) {
-                sv.clearFocus();
-                ((MainActivity) requireActivity()).loadChildFragment(SearchFragment.newInstance(s));
-                return true;
-            }
-
-            @Override
-            public boolean onQueryTextChange(String s) {
-                return false;
-            }
-        });
+        MenuItemUtils.setupSearchItem(menu, (MainActivity) getActivity(), 0);
         isUpdatingFeeds = MenuItemUtils.updateRefreshMenuItem(menu, R.id.refresh_item, updateRefreshMenuItemChecker);
     }
 
     @Override
-    public boolean onOptionsItemSelected(MenuItem item) {
+    public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         if (!super.onOptionsItemSelected(item)) {
             switch (item.getItemId()) {
                 case R.id.refresh_item:
@@ -208,7 +149,8 @@ public abstract class EpisodesListFragment extends Fragment {
                         public void onConfirmButtonPressed(DialogInterface dialog) {
                             dialog.dismiss();
                             DBWriter.markAllItemsRead();
-                            Toast.makeText(getActivity(), R.string.mark_all_read_msg, Toast.LENGTH_SHORT).show();
+                            ((MainActivity) getActivity()).showSnackbarAbovePlayer(
+                                    R.string.mark_all_read_msg, Toast.LENGTH_SHORT);
                         }
                     };
                     markAllReadConfirmationDialog.createNewDialog().show();
@@ -222,7 +164,8 @@ public abstract class EpisodesListFragment extends Fragment {
                         public void onConfirmButtonPressed(DialogInterface dialog) {
                             dialog.dismiss();
                             DBWriter.removeAllNewFlags();
-                            Toast.makeText(getActivity(), R.string.removed_all_new_flags_msg, Toast.LENGTH_SHORT).show();
+                            ((MainActivity) getActivity()).showSnackbarAbovePlayer(
+                                    R.string.removed_all_new_flags_msg, Toast.LENGTH_SHORT);
                         }
                     };
                     removeAllNewFlagsConfirmationDialog.createNewDialog().show();
@@ -236,7 +179,7 @@ public abstract class EpisodesListFragment extends Fragment {
     }
 
     @Override
-    public boolean onContextItemSelected(MenuItem item) {
+    public boolean onContextItemSelected(@NonNull MenuItem item) {
         Log.d(TAG, "onContextItemSelected() called with: " + "item = [" + item + "]");
         if (!getUserVisibleHint()) {
             return false;
@@ -264,20 +207,26 @@ public abstract class EpisodesListFragment extends Fragment {
         View root = inflater.inflate(R.layout.all_episodes_fragment, container, false);
         txtvInformation = root.findViewById(R.id.txtvInformation);
 
-        layoutManager = new LinearLayoutManager(getActivity());
         recyclerView = root.findViewById(android.R.id.list);
-        recyclerView.setLayoutManager(layoutManager);
-        recyclerView.setHasFixedSize(true);
-        recyclerView.addItemDecoration(new HorizontalDividerItemDecoration.Builder(getActivity()).build());
         recyclerView.setVisibility(View.GONE);
+        recyclerView.setRecycledViewPool(((MainActivity) getActivity()).getRecycledViewPool());
+        setupLoadMoreScrollListener();
 
         RecyclerView.ItemAnimator animator = recyclerView.getItemAnimator();
         if (animator instanceof SimpleItemAnimator) {
             ((SimpleItemAnimator) animator).setSupportsChangeAnimations(false);
         }
 
+        SwipeRefreshLayout swipeRefreshLayout = root.findViewById(R.id.swipeRefresh);
+        swipeRefreshLayout.setOnRefreshListener(() -> {
+            AutoUpdateManager.runImmediate(requireContext());
+            new Handler().postDelayed(() -> swipeRefreshLayout.setRefreshing(false),
+                    getResources().getInteger(R.integer.swipe_to_refresh_duration_in_ms));
+        });
+
         progLoading = root.findViewById(R.id.progLoading);
         progLoading.setVisibility(View.VISIBLE);
+        loadingMoreView = root.findViewById(R.id.loadingMore);
 
         emptyView = new EmptyViewHandler(getContext());
         emptyView.attachToRecyclerView(recyclerView);
@@ -291,15 +240,57 @@ public abstract class EpisodesListFragment extends Fragment {
         return root;
     }
 
-    protected void onFragmentLoaded(List<FeedItem> episodes) {
-        listAdapter.notifyDataSetChanged();
+    private void setupLoadMoreScrollListener() {
+        recyclerView.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrolled(@NonNull RecyclerView view, int deltaX, int deltaY) {
+                super.onScrolled(view, deltaX, deltaY);
+                if (!isLoadingMore && hasMoreItems && recyclerView.isScrolledToBottom()) {
+                    /* The end of the list has been reached. Load more data. */
+                    page++;
+                    loadMoreItems();
+                    isLoadingMore = true;
+                }
+            }
+        });
+    }
 
+    private void loadMoreItems() {
+        if (disposable != null) {
+            disposable.dispose();
+        }
+        isLoadingMore = true;
+        loadingMoreView.setVisibility(View.VISIBLE);
+        disposable = Observable.fromCallable(this::loadMoreData)
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(data -> {
+                    if (data.size() < EPISODES_PER_PAGE) {
+                        hasMoreItems = false;
+                    }
+                    episodes.addAll(data);
+                    onFragmentLoaded(episodes);
+                }, error -> Log.e(TAG, Log.getStackTraceString(error)),
+                    () -> {
+                        recyclerView.post(() -> isLoadingMore = false); // Make sure to not always load 2 pages at once
+                        progLoading.setVisibility(View.GONE);
+                        loadingMoreView.setVisibility(View.GONE);
+                    });
+    }
+
+    protected void onFragmentLoaded(List<FeedItem> episodes) {
+        boolean restoreScrollPosition = listAdapter.getItemCount() == 0;
         if (episodes.size() == 0) {
             createRecycleAdapter(recyclerView, emptyView);
+        } else {
+            listAdapter.updateItems(episodes);
         }
-
-        restoreScrollPosition();
-        requireActivity().invalidateOptionsMenu();
+        if (restoreScrollPosition) {
+            recyclerView.restoreScrollPosition(getPrefName());
+        }
+        if (isMenuVisible && isUpdatingFeeds != updateRefreshMenuItemChecker.isRefreshing()) {
+            requireActivity().invalidateOptionsMenu();
+        }
     }
 
     /**
@@ -308,65 +299,11 @@ public abstract class EpisodesListFragment extends Fragment {
      */
     private void createRecycleAdapter(RecyclerView recyclerView, EmptyViewHandler emptyViewHandler) {
         MainActivity mainActivity = (MainActivity) getActivity();
-        listAdapter = new AllEpisodesRecycleAdapter(mainActivity, itemAccess, showOnlyNewEpisodes());
-        listAdapter.setHasStableIds(true);
+        listAdapter = new EpisodeItemListAdapter(mainActivity);
+        listAdapter.updateItems(episodes);
         recyclerView.setAdapter(listAdapter);
         emptyViewHandler.updateAdapter(listAdapter);
     }
-
-    private final AllEpisodesRecycleAdapter.ItemAccess itemAccess = new AllEpisodesRecycleAdapter.ItemAccess() {
-
-        @Override
-        public int getCount() {
-            return episodes.size();
-        }
-
-        @Override
-        public FeedItem getItem(int position) {
-            if (0 <= position && position < episodes.size()) {
-                return episodes.get(position);
-            }
-            return null;
-        }
-
-        @Override
-        public LongList getItemsIds() {
-            LongList ids = new LongList(episodes.size());
-            for (FeedItem episode : episodes) {
-                ids.add(episode.getId());
-            }
-            return ids;
-        }
-
-        @Override
-        public int getItemDownloadProgressPercent(FeedItem item) {
-            for (Downloader downloader : downloaderList) {
-                DownloadRequest downloadRequest = downloader.getDownloadRequest();
-                if (downloadRequest.getFeedfileType() == FeedMedia.FEEDFILETYPE_FEEDMEDIA
-                        && downloadRequest.getFeedfileId() == item.getMedia().getId()) {
-                    return downloadRequest.getProgressPercent();
-                }
-            }
-            return 0;
-        }
-
-        @Override
-        public boolean isInQueue(FeedItem item) {
-            return item != null && item.isTagged(FeedItem.TAG_QUEUE);
-        }
-
-        @Override
-        public LongList getQueueIds() {
-            LongList queueIds = new LongList();
-            for (FeedItem item : episodes) {
-                if (item.isTagged(FeedItem.TAG_QUEUE)) {
-                    queueIds.add(item.getId());
-                }
-            }
-            return queueIds;
-        }
-
-    };
 
     @Subscribe(threadMode = ThreadMode.MAIN)
     public void onEventMainThread(FeedItemEvent event) {
@@ -377,7 +314,7 @@ public abstract class EpisodesListFragment extends Fragment {
                 episodes.remove(pos);
                 if (shouldUpdatedItemRemainInList(item)) {
                     episodes.add(pos, item);
-                    listAdapter.notifyItemChanged(pos);
+                    listAdapter.notifyItemChangedCompat(pos);
                 } else {
                     listAdapter.notifyItemRemoved(pos);
                 }
@@ -388,7 +325,13 @@ public abstract class EpisodesListFragment extends Fragment {
     @Subscribe(threadMode = ThreadMode.MAIN)
     public void onEventMainThread(PlaybackPositionEvent event) {
         if (listAdapter != null) {
-            listAdapter.notifyCurrentlyPlayingItemChanged(event);
+            for (int i = 0; i < listAdapter.getItemCount(); i++) {
+                EpisodeItemViewHolder holder = (EpisodeItemViewHolder) recyclerView.findViewHolderForAdapterPosition(i);
+                if (holder != null && holder.isCurrentlyPlayingItem()) {
+                    holder.notifyPlaybackPositionUpdated(event);
+                    break;
+                }
+            }
         }
     }
 
@@ -400,31 +343,40 @@ public abstract class EpisodesListFragment extends Fragment {
     public void onEventMainThread(DownloadEvent event) {
         Log.d(TAG, "onEventMainThread() called with: " + "event = [" + event + "]");
         DownloaderUpdate update = event.update;
-        downloaderList = update.downloaders;
-        if (isMenuInvalidationAllowed && event.hasChangedFeedUpdateStatus(isUpdatingFeeds)) {
+        if (isMenuVisible && event.hasChangedFeedUpdateStatus(isUpdatingFeeds)) {
             requireActivity().invalidateOptionsMenu();
         }
         if (update.mediaIds.length > 0) {
             for (long mediaId : update.mediaIds) {
                 int pos = FeedItemUtil.indexOfItemWithMediaId(episodes, mediaId);
                 if (pos >= 0) {
-                    listAdapter.notifyItemChanged(pos);
+                    listAdapter.notifyItemChangedCompat(pos);
                 }
             }
         }
     }
 
-    private final EventDistributor.EventListener contentUpdate = new EventDistributor.EventListener() {
-        @Override
-        public void update(EventDistributor eventDistributor, Integer arg) {
-            if ((arg & EVENTS) != 0) {
-                loadItems();
-                if (isUpdatingFeeds != updateRefreshMenuItemChecker.isRefreshing()) {
-                    requireActivity().invalidateOptionsMenu();
-                }
-            }
+    private void updateUi() {
+        loadItems();
+        if (isMenuVisible && isUpdatingFeeds != updateRefreshMenuItemChecker.isRefreshing()) {
+            requireActivity().invalidateOptionsMenu();
         }
-    };
+    }
+
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    public void onPlayerStatusChanged(PlayerStatusEvent event) {
+        updateUi();
+    }
+
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    public void onUnreadItemsChanged(UnreadItemsUpdateEvent event) {
+        updateUi();
+    }
+
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    public void onFeedListChanged(FeedListUpdateEvent event) {
+        updateUi();
+    }
 
     void loadItems() {
         if (disposable != null) {
@@ -435,6 +387,7 @@ public abstract class EpisodesListFragment extends Fragment {
                 .observeOn(AndroidSchedulers.mainThread())
                 .subscribe(data -> {
                     progLoading.setVisibility(View.GONE);
+                    hasMoreItems = true;
                     episodes = data;
                     onFragmentLoaded(episodes);
                 }, error -> Log.e(TAG, Log.getStackTraceString(error)));
@@ -442,4 +395,7 @@ public abstract class EpisodesListFragment extends Fragment {
 
     @NonNull
     protected abstract List<FeedItem> loadData();
+
+    @NonNull
+    protected abstract List<FeedItem> loadMoreData();
 }

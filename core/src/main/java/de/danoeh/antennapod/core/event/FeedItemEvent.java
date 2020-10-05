@@ -21,7 +21,7 @@ public class FeedItemEvent {
     private final Action action;
     @NonNull public final List<FeedItem> items;
 
-    private FeedItemEvent(Action action, List<FeedItem> items) {
+    private FeedItemEvent(@NonNull Action action, @NonNull List<FeedItem> items) {
         this.action = action;
         this.items = items;
     }
@@ -30,14 +30,19 @@ public class FeedItemEvent {
         return new FeedItemEvent(Action.DELETE_MEDIA, items);
     }
 
+    public static FeedItemEvent deletedMedia(FeedItem... items) {
+        return deletedMedia(Arrays.asList(items));
+    }
+
     public static FeedItemEvent updated(List<FeedItem> items) {
         return new FeedItemEvent(Action.UPDATE, items);
     }
 
     public static FeedItemEvent updated(FeedItem... items) {
-        return new FeedItemEvent(Action.UPDATE, Arrays.asList(items));
+        return updated(Arrays.asList(items));
     }
 
+    @NonNull
     @Override
     public String toString() {
         return new ToStringBuilder(this, ToStringStyle.SHORT_PREFIX_STYLE)

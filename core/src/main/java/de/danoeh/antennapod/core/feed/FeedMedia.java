@@ -15,7 +15,6 @@ import java.util.Date;
 import java.util.List;
 import java.util.concurrent.Callable;
 
-import de.danoeh.antennapod.core.gpoddernet.model.GpodnetEpisodeAction;
 import de.danoeh.antennapod.core.preferences.GpodnetPreferences;
 import de.danoeh.antennapod.core.preferences.PlaybackPreferences;
 import de.danoeh.antennapod.core.preferences.UserPreferences;
@@ -25,6 +24,8 @@ import de.danoeh.antennapod.core.storage.DBWriter;
 import de.danoeh.antennapod.core.storage.PodDBAdapter;
 import de.danoeh.antennapod.core.util.ChapterUtils;
 import de.danoeh.antennapod.core.util.playback.Playable;
+import de.danoeh.antennapod.core.sync.SyncService;
+import de.danoeh.antennapod.core.sync.model.EpisodeAction;
 
 public class FeedMedia extends FeedFile implements Playable {
     private static final String TAG = "FeedMedia";
@@ -97,17 +98,17 @@ public class FeedMedia extends FeedFile implements Playable {
     }
 
     public static FeedMedia fromCursor(Cursor cursor) {
-        int indexId = cursor.getColumnIndex(PodDBAdapter.KEY_ID);
-        int indexPlaybackCompletionDate = cursor.getColumnIndex(PodDBAdapter.KEY_PLAYBACK_COMPLETION_DATE);
-        int indexDuration = cursor.getColumnIndex(PodDBAdapter.KEY_DURATION);
-        int indexPosition = cursor.getColumnIndex(PodDBAdapter.KEY_POSITION);
-        int indexSize = cursor.getColumnIndex(PodDBAdapter.KEY_SIZE);
-        int indexMimeType = cursor.getColumnIndex(PodDBAdapter.KEY_MIME_TYPE);
-        int indexFileUrl = cursor.getColumnIndex(PodDBAdapter.KEY_FILE_URL);
-        int indexDownloadUrl = cursor.getColumnIndex(PodDBAdapter.KEY_DOWNLOAD_URL);
-        int indexDownloaded = cursor.getColumnIndex(PodDBAdapter.KEY_DOWNLOADED);
-        int indexPlayedDuration = cursor.getColumnIndex(PodDBAdapter.KEY_PLAYED_DURATION);
-        int indexLastPlayedTime = cursor.getColumnIndex(PodDBAdapter.KEY_LAST_PLAYED_TIME);
+        int indexId = cursor.getColumnIndexOrThrow(PodDBAdapter.SELECT_KEY_MEDIA_ID);
+        int indexPlaybackCompletionDate = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_PLAYBACK_COMPLETION_DATE);
+        int indexDuration = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_DURATION);
+        int indexPosition = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_POSITION);
+        int indexSize = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_SIZE);
+        int indexMimeType = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_MIME_TYPE);
+        int indexFileUrl = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_FILE_URL);
+        int indexDownloadUrl = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_DOWNLOAD_URL);
+        int indexDownloaded = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_DOWNLOADED);
+        int indexPlayedDuration = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_PLAYED_DURATION);
+        int indexLastPlayedTime = cursor.getColumnIndexOrThrow(PodDBAdapter.KEY_LAST_PLAYED_TIME);
 
         long mediaId = cursor.getLong(indexId);
         Date playbackCompletionDate = null;
@@ -208,7 +209,7 @@ public class FeedMedia extends FeedFile implements Playable {
      * currently being played.
      */
     public boolean isPlaying() {
-        return PlaybackPreferences.getCurrentlyPlayingMedia() == FeedMedia.PLAYABLE_TYPE_FEEDMEDIA
+        return PlaybackPreferences.getCurrentlyPlayingMediaType() == FeedMedia.PLAYABLE_TYPE_FEEDMEDIA
                 && PlaybackPreferences.getCurrentlyPlayingFeedMediaId() == id;
     }
 
@@ -221,19 +222,9 @@ public class FeedMedia extends FeedFile implements Playable {
                 ((PlaybackPreferences.getCurrentPlayerStatus() == PlaybackPreferences.PLAYER_STATUS_PLAYING));
     }
 
-    /**
-     * Reads playback preferences to determine whether this FeedMedia object is
-     * currently being played and the current player status is paused.
-     */
-    public boolean isCurrentlyPaused() {
-        return isPlaying() &&
-                ((PlaybackPreferences.getCurrentPlayerStatus() == PlaybackPreferences.PLAYER_STATUS_PAUSED));
-    }
-
-
     public boolean hasAlmostEnded() {
         int smartMarkAsPlayedSecs = UserPreferences.getSmartMarkAsPlayedSecs();
-        return this.position >= this.duration - smartMarkAsPlayedSecs * 1000;
+        return this.duration > 0 && this.position >= this.duration - smartMarkAsPlayedSecs * 1000;
     }
 
     @Override
@@ -490,7 +481,7 @@ public class FeedMedia extends FeedFile implements Playable {
 
     @Override
     public void onPlaybackStart() {
-        startPosition = (position > 0) ? position : 0;
+        startPosition = Math.max(position, 0);
         playedDurationWhenStarted = played_duration;
     }
 
@@ -512,17 +503,14 @@ public class FeedMedia extends FeedFile implements Playable {
 
     private void postPlaybackTasks(Context context, boolean completed) {
         if (item != null) {
-            // gpodder play action
-            if (startPosition >= 0 && (completed || startPosition < position) &&
-                    GpodnetPreferences.loggedIn()) {
-                GpodnetEpisodeAction action = new GpodnetEpisodeAction.Builder(item, GpodnetEpisodeAction.Action.PLAY)
-                        .currentDeviceId()
+            if (startPosition >= 0 && (completed || startPosition < position) && GpodnetPreferences.loggedIn()) {
+                EpisodeAction action = new EpisodeAction.Builder(item, EpisodeAction.PLAY)
                         .currentTimestamp()
                         .started(startPosition / 1000)
                         .position((completed ? duration : position) / 1000)
                         .total(duration / 1000)
                         .build();
-                GpodnetPreferences.enqueueEpisodeAction(action);
+                SyncService.enqueueEpisodeAction(context, action);
             }
         }
     }
@@ -566,10 +554,10 @@ public class FeedMedia extends FeedFile implements Playable {
 
     @Override
     public String getImageLocation() {
-        if (hasEmbeddedPicture()) {
-            return getLocalMediaUrl();
-        } else if(item != null) {
+        if (item != null) {
             return item.getImageLocation();
+        } else if (hasEmbeddedPicture()) {
+            return getLocalMediaUrl();
         } else {
             return null;
         }

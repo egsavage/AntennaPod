@@ -1243,14 +1243,11 @@ public class CastManager extends BaseCastManager implements OnFailedListener {
             throw new NoConnectionException();
         }
         Log.d(TAG, "remoteMediaPlayer.seek() to position " + position);
-        remoteMediaPlayer.seek(mApiClient,
-                position,
-                RESUME_STATE_UNCHANGED).
-                setResultCallback(result -> {
-                    if (!result.getStatus().isSuccess()) {
-                        onFailed(R.string.cast_failed_seek, result.getStatus().getStatusCode());
-                    }
-                });
+        remoteMediaPlayer.seek(mApiClient, position, RESUME_STATE_UNCHANGED).setResultCallback(result -> {
+            if (!result.getStatus().isSuccess()) {
+                onFailed(R.string.cast_failed_seek, result.getStatus().getStatusCode());
+            }
+        });
     }
 
     /**
@@ -1523,7 +1520,7 @@ public class CastManager extends BaseCastManager implements OnFailedListener {
     private void onQueueUpdated(List<MediaQueueItem> queueItems, MediaQueueItem item,
                                 int repeatMode, boolean shuffle) {
         Log.d(TAG, "onQueueUpdated() reached");
-        Log.d(TAG, String.format("Queue Items size: %d, Item: %s, Repeat Mode: %d, Shuffle: %s",
+        Log.d(TAG, String.format(Locale.US, "Queue Items size: %d, Item: %s, Repeat Mode: %d, Shuffle: %s",
                 queueItems == null ? 0 : queueItems.size(), item, repeatMode, shuffle));
         if (queueItems != null) {
             mediaQueue = new MediaQueue(new CopyOnWriteArrayList<>(queueItems), item, shuffle,

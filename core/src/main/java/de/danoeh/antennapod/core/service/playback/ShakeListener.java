@@ -52,13 +52,12 @@ class ShakeListener implements SensorEventListener
         double gForce = Math.sqrt(gX*gX + gY*gY + gZ*gZ);
         if (gForce > 2.25) {
             Log.d(TAG, "Detected shake " + gForce);
-            mSleepTimer.onShake();
+            mSleepTimer.restart();
         }
     }
 
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) {
-        return;
     }
 
 }

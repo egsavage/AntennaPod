@@ -9,6 +9,7 @@ import com.google.android.gms.cast.MediaInfo;
 import com.google.android.gms.cast.MediaMetadata;
 import com.google.android.gms.common.images.WebImage;
 
+import de.danoeh.antennapod.core.util.playback.RemoteMedia;
 import java.util.Calendar;
 import java.util.List;
 
@@ -99,8 +100,8 @@ public class CastUtils {
                 metadata.putString(MediaMetadata.KEY_SUBTITLE, subtitle);
             }
 
-            if (!TextUtils.isEmpty(feedItem.getImageUrl())) {
-                metadata.addImage(new WebImage(Uri.parse(feedItem.getImageUrl())));
+            if (!TextUtils.isEmpty(feedItem.getImageLocation())) {
+                metadata.addImage(new WebImage(Uri.parse(feedItem.getImageLocation())));
             }
             Calendar calendar = Calendar.getInstance();
             calendar.setTime(media.getItem().getPubDate());
@@ -205,7 +206,7 @@ public class CastUtils {
                 }
             }
             if (result == null) {
-                FeedItem feedItem = DBReader.getFeedItem(metadata.getString(KEY_FEED_URL),
+                FeedItem feedItem = DBReader.getFeedItemByUrl(metadata.getString(KEY_FEED_URL),
                         metadata.getString(KEY_EPISODE_IDENTIFIER));
                 if (feedItem != null) {
                     result = feedItem.getMedia();

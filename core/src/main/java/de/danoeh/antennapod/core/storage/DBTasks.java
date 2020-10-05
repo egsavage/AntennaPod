@@ -6,6 +6,23 @@ import android.database.Cursor;
 import android.os.Looper;
 import android.text.TextUtils;
 import android.util.Log;
+import androidx.annotation.VisibleForTesting;
+import de.danoeh.antennapod.core.ClientConfig;
+import de.danoeh.antennapod.core.R;
+import de.danoeh.antennapod.core.event.FeedItemEvent;
+import de.danoeh.antennapod.core.event.FeedListUpdateEvent;
+import de.danoeh.antennapod.core.event.MessageEvent;
+import de.danoeh.antennapod.core.feed.Feed;
+import de.danoeh.antennapod.core.feed.FeedItem;
+import de.danoeh.antennapod.core.feed.FeedMedia;
+import de.danoeh.antennapod.core.feed.FeedPreferences;
+import de.danoeh.antennapod.core.preferences.UserPreferences;
+import de.danoeh.antennapod.core.service.download.DownloadStatus;
+import de.danoeh.antennapod.core.sync.SyncService;
+import de.danoeh.antennapod.core.util.DownloadError;
+import de.danoeh.antennapod.core.util.LongList;
+import de.danoeh.antennapod.core.util.comparator.FeedItemPubdateComparator;
+import org.greenrobot.eventbus.EventBus;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -19,22 +36,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicBoolean;
-
-import de.danoeh.antennapod.core.ClientConfig;
-import de.danoeh.antennapod.core.feed.EventDistributor;
-import de.danoeh.antennapod.core.feed.Feed;
-import de.danoeh.antennapod.core.feed.FeedItem;
-import de.danoeh.antennapod.core.feed.FeedMedia;
-import de.danoeh.antennapod.core.feed.FeedPreferences;
-import de.danoeh.antennapod.core.service.GpodnetSyncService;
-import de.danoeh.antennapod.core.service.download.DownloadStatus;
-import de.danoeh.antennapod.core.service.playback.PlaybackService;
-import de.danoeh.antennapod.core.util.DownloadError;
-import de.danoeh.antennapod.core.util.IntentUtils;
-import de.danoeh.antennapod.core.util.LongList;
-import de.danoeh.antennapod.core.util.comparator.FeedItemPubdateComparator;
-import de.danoeh.antennapod.core.util.exception.MediaFileNotFoundException;
-import de.danoeh.antennapod.core.util.playback.PlaybackServiceStarter;
 
 import static android.content.Context.MODE_PRIVATE;
 
@@ -95,53 +96,6 @@ public final class DBTasks {
         }
     }
 
-    /**
-     * Starts playback of a FeedMedia object's file. This method will build an Intent based on the given parameters to
-     * start the {@link PlaybackService}.
-     *
-     * @param context           Used for sending starting Services and Activities.
-     * @param media             The FeedMedia object.
-     * @param showPlayer        If true, starts the appropriate player activity ({@link de.danoeh.antennapod.activity.AudioplayerActivity}
-     *                          or {@link de.danoeh.antennapod.activity.VideoplayerActivity}
-     * @param startWhenPrepared Parameter for the {@link PlaybackService} start intent. If true, playback will start as
-     *                          soon as the PlaybackService has finished loading the FeedMedia object's file.
-     * @param shouldStream      Parameter for the {@link PlaybackService} start intent. If true, the FeedMedia object's file
-     *                          will be streamed, otherwise the downloaded file will be used. If the downloaded file cannot be
-     *                          found, the PlaybackService will shutdown and the database entry of the FeedMedia object will be
-     *                          corrected.
-     */
-    public static void playMedia(final Context context, final FeedMedia media,
-                                 boolean showPlayer, boolean startWhenPrepared, boolean shouldStream) {
-        try {
-            if (!shouldStream) {
-                if (!media.fileExists()) {
-                    throw new MediaFileNotFoundException(
-                            "No episode was found at " + media.getFile_url(),
-                            media);
-                }
-            }
-
-            new PlaybackServiceStarter(context, media)
-                    .callEvenIfRunning(true)
-                    .startWhenPrepared(startWhenPrepared)
-                    .shouldStream(shouldStream)
-                    .start();
-
-            if (showPlayer) {
-                // Launch media player
-                context.startActivity(PlaybackService.getPlayerActivityIntent(
-                        context, media));
-            }
-            DBWriter.addQueueItemAt(context, media.getItem().getId(), 0, false);
-        } catch (MediaFileNotFoundException e) {
-            e.printStackTrace();
-            if (media.isPlaying()) {
-                IntentUtils.sendLocalBroadcast(context, PlaybackService.ACTION_SHUTDOWN_PLAYBACK_SERVICE);
-            }
-            notifyMissingFeedMediaFile(context, media);
-        }
-    }
-
     private static final AtomicBoolean isRefreshing = new AtomicBoolean(false);
 
     /**
@@ -151,8 +105,9 @@ public final class DBTasks {
      * enqueuing Feeds for download from a previous call
      *
      * @param context  Might be used for accessing the database
+     * @param initiatedByUser a boolean indicating if the refresh was triggered by user action.
      */
-    public static void refreshAllFeeds(final Context context) {
+    public static void refreshAllFeeds(final Context context, boolean initiatedByUser) {
         if (!isRefreshing.compareAndSet(false, true)) {
             Log.d(TAG, "Ignoring request to refresh all feeds: Refresh lock is locked");
             return;
@@ -162,15 +117,13 @@ public final class DBTasks {
             throw new IllegalStateException("DBTasks.refreshAllFeeds() must not be called from the main thread.");
         }
 
-        refreshFeeds(context, DBReader.getFeedList());
+        refreshFeeds(context, DBReader.getFeedList(), initiatedByUser);
         isRefreshing.set(false);
 
         SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, MODE_PRIVATE);
         prefs.edit().putLong(PREF_LAST_REFRESH, System.currentTimeMillis()).apply();
 
-        if (ClientConfig.gpodnetCallbacks.gpodnetEnabled()) {
-            GpodnetSyncService.sendSyncIntent(context);
-        }
+        SyncService.sync(context);
         // Note: automatic download of episodes will be done but not here.
         // Instead it is done after all feeds have been refreshed (asynchronously),
         // in DownloadService.onDestroy()
@@ -180,9 +133,11 @@ public final class DBTasks {
     /**
      * @param context
      * @param feedList the list of feeds to refresh
+     * @param initiatedByUser a boolean indicating if the refresh was triggered by user action.
      */
     private static void refreshFeeds(final Context context,
-                                     final List<Feed> feedList) {
+                                     final List<Feed> feedList,
+                                     boolean initiatedByUser) {
 
         for (Feed feed : feedList) {
             FeedPreferences prefs = feed.getPreferences();
@@ -194,11 +149,12 @@ public final class DBTasks {
                 } catch (DownloadRequestException e) {
                     e.printStackTrace();
                     DBWriter.addDownloadStatus(
-                            new DownloadStatus(feed, feed
-                                    .getHumanReadableIdentifier(),
-                                    DownloadError.ERROR_REQUEST_ERROR, false, e
-                                    .getMessage()
-                            )
+                            new DownloadStatus(feed,
+                                               feed.getHumanReadableIdentifier(),
+                                               DownloadError.ERROR_REQUEST_ERROR,
+                                               false,
+                                               e.getMessage(),
+                                               initiatedByUser)
                     );
                 }
             }
@@ -214,15 +170,16 @@ public final class DBTasks {
      */
     public static void forceRefreshCompleteFeed(final Context context, final Feed feed) {
         try {
-            refreshFeed(context, feed, true, true);
+            refreshFeed(context, feed, true, true, false);
         } catch (DownloadRequestException e) {
             e.printStackTrace();
             DBWriter.addDownloadStatus(
-                    new DownloadStatus(feed, feed
-                            .getHumanReadableIdentifier(),
-                            DownloadError.ERROR_REQUEST_ERROR, false, e
-                            .getMessage()
-                    )
+                    new DownloadStatus(feed,
+                                       feed.getHumanReadableIdentifier(),
+                                       DownloadError.ERROR_REQUEST_ERROR,
+                                       false,
+                                       e.getMessage(),
+                                       false)
             );
         }
     }
@@ -242,7 +199,7 @@ public final class DBTasks {
             nextFeed.setPageNr(pageNr);
             nextFeed.setPaged(true);
             nextFeed.setId(feed.getId());
-            DownloadRequester.getInstance().downloadFeed(context, nextFeed, loadAllPages, false);
+            DownloadRequester.getInstance().downloadFeed(context, nextFeed, loadAllPages, false, true);
         } else {
             Log.e(TAG, "loadNextPageOfFeed: Feed was either not paged or contained no nextPageLink");
         }
@@ -258,7 +215,7 @@ public final class DBTasks {
     private static void refreshFeed(Context context, Feed feed)
             throws DownloadRequestException {
         Log.d(TAG, "refreshFeed(feed.id: " + feed.getId() +")");
-        refreshFeed(context, feed, false, false);
+        refreshFeed(context, feed, false, false, false);
     }
 
     /**
@@ -267,13 +224,13 @@ public final class DBTasks {
      * @param context Used for requesting the download.
      * @param feed    The Feed object.
      */
-    public static void forceRefreshFeed(Context context, Feed feed)
+    public static void forceRefreshFeed(Context context, Feed feed, boolean initiatedByUser)
             throws DownloadRequestException {
         Log.d(TAG, "refreshFeed(feed.id: " + feed.getId() +")");
-        refreshFeed(context, feed, false, true);
+        refreshFeed(context, feed, false, true, initiatedByUser);
     }
 
-    private static void refreshFeed(Context context, Feed feed, boolean loadAllPages, boolean force)
+    private static void refreshFeed(Context context, Feed feed, boolean loadAllPages, boolean force, boolean initiatedByUser)
             throws DownloadRequestException {
         Feed f;
         String lastUpdate = feed.hasLastUpdateFailed() ? null : feed.getLastUpdate();
@@ -284,73 +241,35 @@ public final class DBTasks {
                     feed.getPreferences().getUsername(), feed.getPreferences().getPassword());
         }
         f.setId(feed.getId());
-        DownloadRequester.getInstance().downloadFeed(context, f, loadAllPages, force);
+        DownloadRequester.getInstance().downloadFeed(context, f, loadAllPages, force, initiatedByUser);
     }
 
     /**
-     * Notifies the database about a missing FeedMedia file. This method will correct the FeedMedia object's values in the
-     * DB and send a FeedUpdateBroadcast.
+     * Notifies the database about a missing FeedMedia file. This method will correct the FeedMedia object's
+     * values in the DB and send a FeedItemEvent.
      */
-    public static void notifyMissingFeedMediaFile(final Context context,
-                                                  final FeedMedia media) {
-        Log.i(TAG,
-                "The feedmanager was notified about a missing episode. It will update its database now.");
+    public static void notifyMissingFeedMediaFile(final Context context, final FeedMedia media) {
+        Log.i(TAG, "The feedmanager was notified about a missing episode. It will update its database now.");
         media.setDownloaded(false);
         media.setFile_url(null);
         DBWriter.setFeedMedia(media);
-        EventDistributor.getInstance().sendFeedUpdateBroadcast();
+        EventBus.getDefault().post(FeedItemEvent.deletedMedia(media.getItem()));
+        EventBus.getDefault().post(new MessageEvent(context.getString(R.string.error_file_not_found)));
     }
 
-    /**
-     * Requests the download of a list of FeedItem objects.
-     *
-     * @param context Used for requesting the download and accessing the DB.
-     * @param items   The FeedItem objects.
-     */
-    public static void downloadFeedItems(final Context context,
-                                         FeedItem... items) throws DownloadRequestException {
-        downloadFeedItems(true, context, items);
-    }
-
-    static void downloadFeedItems(boolean performAutoCleanup,
-                                  final Context context, final FeedItem... items)
-            throws DownloadRequestException {
-        final DownloadRequester requester = DownloadRequester.getInstance();
-
-        if (performAutoCleanup) {
-            new Thread() {
-
-                @Override
-                public void run() {
-                    ClientConfig.dbTasksCallbacks.getEpisodeCacheCleanupAlgorithm()
-                            .makeRoomForEpisodes(context, items.length);
-                }
-
-            }.start();
-        }
-        for (FeedItem item : items) {
-            if (item.getMedia() != null
-                    && !requester.isDownloadingFile(item.getMedia())
-                    && !item.getMedia().isDownloaded()) {
-                if (items.length > 1) {
-                    try {
-                        requester.downloadMedia(context, item.getMedia());
-                    } catch (DownloadRequestException e) {
-                        e.printStackTrace();
-                        DBWriter.addDownloadStatus(
-                                new DownloadStatus(item.getMedia(), item
-                                        .getMedia()
-                                        .getHumanReadableIdentifier(),
-                                        DownloadError.ERROR_REQUEST_ERROR,
-                                        false, e.getMessage()
-                                )
-                        );
-                    }
-                } else {
-                    requester.downloadMedia(context, item.getMedia());
+    public static List<? extends FeedItem> enqueueFeedItemsToDownload(final Context context,
+                       List<? extends FeedItem> items) throws InterruptedException, ExecutionException {
+        List<FeedItem> itemsToEnqueue = new ArrayList<>();
+        if (UserPreferences.enqueueDownloadedEpisodes()) {
+            LongList queueIDList = DBReader.getQueueIDList();
+            for (FeedItem item : items) {
+                if (!queueIDList.contains(item.getId())) {
+                    itemsToEnqueue.add(item);
                 }
             }
+            DBWriter.addQueueItem(context, false, itemsToEnqueue.toArray(new FeedItem[0])).get();
         }
+        return itemsToEnqueue;
     }
 
     /**
@@ -408,18 +327,6 @@ public final class DBTasks {
             }
         }
         return result;
-    }
-
-    /**
-     * Loads the queue from the database and checks if the specified FeedItem is in the queue.
-     * This method should NOT be executed in the GUI thread.
-     *
-     * @param context    Used for accessing the DB.
-     * @param feedItemId ID of the FeedItem
-     */
-    public static boolean isInQueue(Context context, final long feedItemId) {
-        LongList queue = DBReader.getQueueIDList();
-        return queue.contains(feedItemId);
     }
 
     private static Feed searchFeedByIdentifyingValueOrID(PodDBAdapter adapter,
@@ -527,17 +434,22 @@ public final class DBTasks {
                         // item is new
                         item.setFeed(savedFeed);
                         item.setAutoDownload(savedFeed.getPreferences().getAutoDownload());
-                        savedFeed.getItems().add(idx, item);
+
+                        if (idx >= savedFeed.getItems().size()) {
+                            savedFeed.getItems().add(item);
+                        } else {
+                            savedFeed.getItems().add(idx, item);
+                        }
 
                         // only mark the item new if it was published after or at the same time
                         // as the most recent item
                         // (if the most recent date is null then we can assume there are no items
                         // and this is the first, hence 'new')
-                        if (priorMostRecentDate == null ||
-                                priorMostRecentDate.before(item.getPubDate()) ||
-                                priorMostRecentDate.equals(item.getPubDate())) {
-                            Log.d(TAG, "Marking item published on " + item.getPubDate() +
-                                    " new, prior most recent date = " + priorMostRecentDate);
+                        if (priorMostRecentDate == null
+                                || priorMostRecentDate.before(item.getPubDate())
+                                || priorMostRecentDate.equals(item.getPubDate())) {
+                            Log.d(TAG, "Marking item published on " + item.getPubDate()
+                                    + " new, prior most recent date = " + priorMostRecentDate);
                             item.setNew();
                         }
                     } else {
@@ -557,33 +469,32 @@ public final class DBTasks {
         adapter.close();
 
         try {
-            DBWriter.addNewFeed(context, newFeedsList.toArray(new Feed[newFeedsList.size()])).get();
-            DBWriter.setCompleteFeed(updatedFeedsList.toArray(new Feed[updatedFeedsList.size()])).get();
+            DBWriter.addNewFeed(context, newFeedsList.toArray(new Feed[0])).get();
+            DBWriter.setCompleteFeed(updatedFeedsList.toArray(new Feed[0])).get();
         } catch (InterruptedException | ExecutionException e) {
             e.printStackTrace();
         }
 
-        EventDistributor.getInstance().sendFeedUpdateBroadcast();
+        EventBus.getDefault().post(new FeedListUpdateEvent(updatedFeedsList));
 
         return resultFeeds;
     }
 
     /**
-     * Searches the titles of FeedItems of a specific Feed for a given
-     * string.
+     * Searches the FeedItems of a specific Feed for a given string.
      *
      * @param context Used for accessing the DB.
      * @param feedID  The id of the feed whose items should be searched.
      * @param query   The search string.
-     * @return A FutureTask object that executes the search request and returns the search result as a List of FeedItems.
+     * @return A FutureTask object that executes the search request
+     *         and returns the search result as a List of FeedItems.
      */
-    public static FutureTask<List<FeedItem>> searchFeedItemTitle(final Context context,
+    public static FutureTask<List<FeedItem>> searchFeedItems(final Context context,
                                                                  final long feedID, final String query) {
         return new FutureTask<>(new QueryTask<List<FeedItem>>(context) {
             @Override
             public void execute(PodDBAdapter adapter) {
-                Cursor searchResult = adapter.searchItemTitles(feedID,
-                        query);
+                Cursor searchResult = adapter.searchItems(feedID, query);
                 List<FeedItem> items = DBReader.extractItemlistFromCursor(searchResult);
                 DBReader.loadAdditionalFeedItemListData(items);
                 setResult(items);
@@ -592,121 +503,19 @@ public final class DBTasks {
         });
     }
 
-    /**
-     * Searches the authors of FeedItems of a specific Feed for a given
-     * string.
-     *
-     * @param context Used for accessing the DB.
-     * @param feedID  The id of the feed whose items should be searched.
-     * @param query   The search string.
-     * @return A FutureTask object that executes the search request and returns the search result as a List of FeedItems.
-     */
-    public static FutureTask<List<FeedItem>> searchFeedItemAuthor(final Context context,
-                                                                 final long feedID, final String query) {
-        return new FutureTask<>(new QueryTask<List<FeedItem>>(context) {
+    public static FutureTask<List<Feed>> searchFeeds(final Context context, final String query) {
+        return new FutureTask<>(new QueryTask<List<Feed>>(context) {
             @Override
             public void execute(PodDBAdapter adapter) {
-                Cursor searchResult = adapter.searchItemAuthors(feedID,
-                        query);
-                List<FeedItem> items = DBReader.extractItemlistFromCursor(searchResult);
-                DBReader.loadAdditionalFeedItemListData(items);
+                Cursor cursor = adapter.searchFeeds(query);
+                List<Feed> items = new ArrayList<>();
+                if (cursor.moveToFirst()) {
+                    do {
+                        items.add(Feed.fromCursor(cursor));
+                    } while (cursor.moveToNext());
+                }
                 setResult(items);
-                searchResult.close();
-            }
-        });
-    }
-
-    /**
-     * Searches the feed identifiers of FeedItems of a specific Feed for a given
-     * string.
-     *
-     * @param context Used for accessing the DB.
-     * @param feedID  The id of the feed whose items should be searched.
-     * @param query   The search string.
-     * @return A FutureTask object that executes the search request and returns the search result as a List of FeedItems.
-     */
-    public static FutureTask<List<FeedItem>> searchFeedItemFeedIdentifier(final Context context,
-                                                                 final long feedID, final String query) {
-        return new FutureTask<>(new QueryTask<List<FeedItem>>(context) {
-            @Override
-            public void execute(PodDBAdapter adapter) {
-                Cursor searchResult = adapter.searchItemFeedIdentifiers(feedID,
-                        query);
-                List<FeedItem> items = DBReader.extractItemlistFromCursor(searchResult);
-                DBReader.loadAdditionalFeedItemListData(items);
-                setResult(items);
-                searchResult.close();
-            }
-        });
-    }
-
-    /**
-     * Searches the descriptions of FeedItems of a specific Feed for a given
-     * string.
-     *
-     * @param context Used for accessing the DB.
-     * @param feedID  The id of the feed whose items should be searched.
-     * @param query   The search string
-     * @return A FutureTask object that executes the search request and returns the search result as a List of FeedItems.
-     */
-    public static FutureTask<List<FeedItem>> searchFeedItemDescription(final Context context,
-                                                                       final long feedID, final String query) {
-        return new FutureTask<>(new QueryTask<List<FeedItem>>(context) {
-            @Override
-            public void execute(PodDBAdapter adapter) {
-                Cursor searchResult = adapter.searchItemDescriptions(feedID,
-                        query);
-                List<FeedItem> items = DBReader.extractItemlistFromCursor(searchResult);
-                DBReader.loadAdditionalFeedItemListData(items);
-                setResult(items);
-                searchResult.close();
-            }
-        });
-    }
-
-    /**
-     * Searches the contentEncoded-value of FeedItems of a specific Feed for a given
-     * string.
-     *
-     * @param context Used for accessing the DB.
-     * @param feedID  The id of the feed whose items should be searched.
-     * @param query   The search string
-     * @return A FutureTask object that executes the search request and returns the search result as a List of FeedItems.
-     */
-    public static FutureTask<List<FeedItem>> searchFeedItemContentEncoded(final Context context,
-                                                                          final long feedID, final String query) {
-        return new FutureTask<>(new QueryTask<List<FeedItem>>(context) {
-            @Override
-            public void execute(PodDBAdapter adapter) {
-                Cursor searchResult = adapter.searchItemContentEncoded(feedID,
-                        query);
-                List<FeedItem> items = DBReader.extractItemlistFromCursor(searchResult);
-                DBReader.loadAdditionalFeedItemListData(items);
-                setResult(items);
-                searchResult.close();
-            }
-        });
-    }
-
-    /**
-     * Searches chapters of the FeedItems of a specific Feed for a given string.
-     *
-     * @param context Used for accessing the DB.
-     * @param feedID  The id of the feed whose items should be searched.
-     * @param query   The search string
-     * @return A FutureTask object that executes the search request and returns the search result as a List of FeedItems.
-     */
-    public static FutureTask<List<FeedItem>> searchFeedItemChapters(final Context context,
-                                                                    final long feedID, final String query) {
-        return new FutureTask<>(new QueryTask<List<FeedItem>>(context) {
-            @Override
-            public void execute(PodDBAdapter adapter) {
-                Cursor searchResult = adapter.searchItemChapters(feedID,
-                        query);
-                List<FeedItem> items = DBReader.extractItemlistFromCursor(searchResult);
-                DBReader.loadAdditionalFeedItemListData(items);
-                setResult(items);
-                searchResult.close();
+                cursor.close();
             }
         });
     }

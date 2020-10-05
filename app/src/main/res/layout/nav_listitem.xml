@@ -1,16 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-
-<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
-                xmlns:tools="http://schemas.android.com/tools"
-                android:orientation="vertical"
-                android:layout_width="match_parent"
-                android:layout_height="@dimen/listitem_iconwithtext_height"
-                android:foreground="?attr/selectableItemBackground"
-                tools:background="@android:color/darker_gray">
+<RelativeLayout
+        xmlns:android="http://schemas.android.com/apk/res/android"
+        xmlns:tools="http://schemas.android.com/tools"
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/listitem_iconwithtext_height"
+        android:foreground="?attr/selectableItemBackground" >
 
     <ImageView
         android:id="@+id/imgvCover"
-        android:contentDescription="@string/cover_label"
+        android:importantForAccessibility="no"
         android:layout_width="@dimen/thumbnail_length_navlist"
         android:layout_height="@dimen/thumbnail_length_navlist"
         android:layout_alignParentLeft="true"
@@ -19,13 +18,11 @@
         android:adjustViewBounds="true"
         android:cropToPadding="true"
         android:scaleType="centerInside"
-        android:padding="4dp"
         android:layout_marginLeft="@dimen/listitem_icon_leftpadding"
         android:layout_marginStart="@dimen/listitem_icon_leftpadding"
         android:layout_marginTop="4dp"
         android:layout_marginBottom="4dp"
-        tools:src="@drawable/ic_new_releases_white_24dp"
-        tools:background="@android:color/holo_green_dark"/>
+        tools:src="@drawable/ic_download_black"/>
 
 
     <TextView
@@ -44,9 +41,27 @@
         android:layout_marginEnd="48dp"
         android:layout_toRightOf="@id/imgvCover"
         android:layout_toEndOf="@id/imgvCover"
-        tools:text="Navigation item title"
-        tools:background="@android:color/holo_green_dark"
-        />
+        tools:text="Navigation item title" />
+
+    <com.joanzapata.iconify.widget.IconTextView
+        android:id="@+id/itxtvFailure"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_toLeftOf="@id/txtvCount"
+        android:layout_toStartOf="@id/txtvCount"
+        android:layout_marginLeft="@dimen/list_vertical_padding"
+        android:layout_marginStart="@dimen/list_vertical_padding"
+        android:layout_marginRight="@dimen/list_vertical_padding"
+        android:layout_marginEnd="@dimen/list_vertical_padding"
+        android:layout_alignWithParentIfMissing="true"
+        android:lines="1"
+        android:text="{fa-exclamation-circle}"
+        android:textColor="@color/download_failed_red"
+        android:textSize="@dimen/text_size_navdrawer"
+        android:layout_centerVertical="true"
+        android:visibility="gone"
+        tools:text="!"
+        tools:background="@android:color/holo_green_dark"/>
 
     <TextView
         android:id="@+id/txtvCount"
@@ -54,7 +69,7 @@
         android:layout_height="wrap_content"
         android:lines="1"
         android:textColor="?android:attr/textColorTertiary"
-        android:textSize="@dimen/text_size_navdrawer"
+        android:textSize="14sp"
         android:layout_marginLeft="12dp"
         android:layout_marginStart="12dp"
         android:layout_marginRight="@dimen/listitem_icon_rightpadding"
@@ -62,6 +77,5 @@
         android:layout_alignParentRight="true"
         android:layout_alignParentEnd="true"
         android:layout_centerVertical="true"
-        tools:text="23"
-        tools:background="@android:color/holo_green_dark"/>
+        tools:text="23" />
 </RelativeLayout>

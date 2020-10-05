@@ -3,12 +3,15 @@ package de.danoeh.antennapod.core.preferences;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
-import android.preference.PreferenceManager;
-import androidx.annotation.IntRange;
-import androidx.annotation.NonNull;
-import androidx.core.app.NotificationCompat;
+import android.os.Build;
+import androidx.preference.PreferenceManager;
 import android.text.TextUtils;
 import android.util.Log;
+
+import androidx.annotation.IntRange;
+import androidx.annotation.NonNull;
+import androidx.annotation.VisibleForTesting;
+import androidx.core.app.NotificationCompat;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -16,15 +19,19 @@ import org.json.JSONException;
 import java.io.File;
 import java.io.IOException;
 import java.net.Proxy;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-import de.danoeh.antennapod.core.feed.MediaType;
 import de.danoeh.antennapod.core.R;
+import de.danoeh.antennapod.core.feed.MediaType;
 import de.danoeh.antennapod.core.service.download.ProxyConfig;
 import de.danoeh.antennapod.core.storage.APCleanupAlgorithm;
 import de.danoeh.antennapod.core.storage.APNullCleanupAlgorithm;
@@ -43,25 +50,24 @@ import de.danoeh.antennapod.core.util.download.AutoUpdateManager;
 public class UserPreferences {
     private UserPreferences(){}
 
-    private static final String IMPORT_DIR = "import/";
-
     private static final String TAG = "UserPreferences";
 
     // User Interface
     public static final String PREF_THEME = "prefTheme";
     public static final String PREF_HIDDEN_DRAWER_ITEMS = "prefHiddenDrawerItems";
-    private static final String PREF_DRAWER_FEED_ORDER = "prefDrawerFeedOrder";
+    public static final String PREF_DRAWER_FEED_ORDER = "prefDrawerFeedOrder";
     private static final String PREF_DRAWER_FEED_COUNTER = "prefDrawerFeedIndicator";
     public static final String PREF_EXPANDED_NOTIFICATION = "prefExpandNotify";
+    public static final String PREF_USE_EPISODE_COVER = "prefEpisodeCover";
     private static final String PREF_PERSISTENT_NOTIFICATION = "prefPersistNotify";
     public static final String PREF_COMPACT_NOTIFICATION_BUTTONS = "prefCompactNotificationButtons";
     public static final String PREF_LOCKSCREEN_BACKGROUND = "prefLockscreenBackground";
     private static final String PREF_SHOW_DOWNLOAD_REPORT = "prefShowDownloadReport";
+    private static final String PREF_SHOW_AUTO_DOWNLOAD_REPORT = "prefShowAutoDownloadReport";
     public static final String PREF_BACK_BUTTON_BEHAVIOR = "prefBackButtonBehavior";
     private static final String PREF_BACK_BUTTON_GO_TO_PAGE = "prefBackButtonGoToPage";
+    public static final String PREF_FILTER_FEED = "prefFeedFilter";
 
-    // Queue
-    private static final String PREF_QUEUE_ADD_TO_FRONT = "prefQueueAddToFront";
     public static final String PREF_QUEUE_KEEP_SORTED = "prefQueueKeepSorted";
     public static final String PREF_QUEUE_KEEP_SORTED_ORDER = "prefQueueKeepSortedOrder";
 
@@ -81,9 +87,11 @@ public class UserPreferences {
     private static final String PREF_RESUME_AFTER_CALL = "prefResumeAfterCall";
     public static final String PREF_VIDEO_BEHAVIOR = "prefVideoBehavior";
     private static final String PREF_TIME_RESPECTS_SPEED = "prefPlaybackTimeRespectsSpeed";
+    public static final String PREF_STREAM_OVER_DOWNLOAD = "prefStreamOverDownload";
 
     // Network
     private static final String PREF_ENQUEUE_DOWNLOADED = "prefEnqueueDownloaded";
+    public static final String PREF_ENQUEUE_LOCATION = "prefEnqueueLocation";
     public static final String PREF_UPDATE_INTERVAL = "prefAutoUpdateIntervall";
     private static final String PREF_MOBILE_UPDATE = "prefMobileUpdateTypes";
     public static final String PREF_EPISODE_CLEANUP = "prefEpisodeCleanup";
@@ -141,6 +149,8 @@ public class UserPreferences {
     public static final int FEED_COUNTER_SHOW_UNPLAYED = 2;
     public static final int FEED_COUNTER_SHOW_NONE = 3;
     public static final int FEED_COUNTER_SHOW_DOWNLOADED = 4;
+    public static final int FEED_FILTER_NONE = 0;
+    public static final int FEED_FILTER_COUNTER_ZERO = 1;
 
     private static Context context;
     private static SharedPreferences prefs;
@@ -156,7 +166,6 @@ public class UserPreferences {
         UserPreferences.context = context.getApplicationContext();
         UserPreferences.prefs = PreferenceManager.getDefaultSharedPreferences(context);
 
-        createImportDirectory();
         createNoMediaFile();
     }
 
@@ -177,6 +186,17 @@ public class UserPreferences {
             return R.style.Theme_AntennaPod_TrueBlack_NoTitle;
         } else {
             return R.style.Theme_AntennaPod_Light_NoTitle;
+        }
+    }
+
+    public static int getTranslucentTheme() {
+        int theme = getTheme();
+        if (theme == R.style.Theme_AntennaPod_Dark) {
+            return R.style.Theme_AntennaPod_Dark_Translucent;
+        } else if (theme == R.style.Theme_AntennaPod_TrueBlack) {
+            return R.style.Theme_AntennaPod_TrueBlack_Translucent;
+        } else {
+            return R.style.Theme_AntennaPod_Light_Translucent;
         }
     }
 
@@ -222,13 +242,26 @@ public class UserPreferences {
     }
 
     public static int getFeedOrder() {
-        String value = prefs.getString(PREF_DRAWER_FEED_ORDER, "0");
+        String value = prefs.getString(PREF_DRAWER_FEED_ORDER, "" + FEED_ORDER_COUNTER);
         return Integer.parseInt(value);
     }
 
+    public static void setFeedOrder(String selected) {
+        prefs.edit()
+                .putString(PREF_DRAWER_FEED_ORDER, selected)
+                .apply();
+    }
+
     public static int getFeedCounterSetting() {
-        String value = prefs.getString(PREF_DRAWER_FEED_COUNTER, "0");
+        String value = prefs.getString(PREF_DRAWER_FEED_COUNTER, "" + FEED_COUNTER_SHOW_NEW);
         return Integer.parseInt(value);
+    }
+
+    /**
+     * @return {@code true} if episodes should use their own cover, {@code false}  otherwise
+     */
+    public static boolean getUseEpisodeCoverSetting() {
+        return prefs.getBoolean(PREF_USE_EPISODE_COVER, true);
     }
 
     /**
@@ -271,12 +304,41 @@ public class UserPreferences {
         return prefs.getBoolean(PREF_SHOW_DOWNLOAD_REPORT, true);
     }
 
+    public static boolean showAutoDownloadReport() {
+        return prefs.getBoolean(PREF_SHOW_AUTO_DOWNLOAD_REPORT, false);
+    }
+
     public static boolean enqueueDownloadedEpisodes() {
         return prefs.getBoolean(PREF_ENQUEUE_DOWNLOADED, true);
     }
 
-    public static boolean enqueueAtFront() {
-        return prefs.getBoolean(PREF_QUEUE_ADD_TO_FRONT, false);
+    @VisibleForTesting
+    public static void setEnqueueDownloadedEpisodes(boolean enqueueDownloadedEpisodes) {
+        prefs.edit()
+                .putBoolean(PREF_ENQUEUE_DOWNLOADED, enqueueDownloadedEpisodes)
+                .apply();
+    }
+
+    public enum EnqueueLocation {
+        BACK, FRONT, AFTER_CURRENTLY_PLAYING
+    }
+
+    @NonNull
+    public static EnqueueLocation getEnqueueLocation() {
+        String valStr = prefs.getString(PREF_ENQUEUE_LOCATION, EnqueueLocation.BACK.name());
+        try {
+            return EnqueueLocation.valueOf(valStr);
+        } catch (Throwable t) {
+            // should never happen but just in case
+            Log.e(TAG, "getEnqueueLocation: invalid value '" + valStr + "' Use default.", t);
+            return EnqueueLocation.BACK;
+        }
+    }
+
+    public static void setEnqueueLocation(@NonNull EnqueueLocation location) {
+        prefs.edit()
+                .putString(PREF_ENQUEUE_LOCATION, location.name())
+                .apply();
     }
 
     public static boolean isPauseOnHeadsetDisconnect() {
@@ -302,6 +364,14 @@ public class UserPreferences {
 
     public static boolean isFollowQueue() {
         return prefs.getBoolean(PREF_FOLLOW_QUEUE, true);
+    }
+
+    /**
+     * Set to true to enable Continuous Playback
+     */
+    @VisibleForTesting
+    public static void setFollowQueue(boolean value) {
+        prefs.edit().putBoolean(UserPreferences.PREF_FOLLOW_QUEUE, value).apply();
     }
 
     public static boolean shouldSkipKeepEpisode() { return prefs.getBoolean(PREF_SKIP_KEEPS_EPISODE, true); }
@@ -335,7 +405,7 @@ public class UserPreferences {
             return Float.parseFloat(prefs.getString(PREF_PLAYBACK_SPEED, "1.00"));
         } catch (NumberFormatException e) {
             Log.e(TAG, Log.getStackTraceString(e));
-            UserPreferences.setPlaybackSpeed("1.00");
+            UserPreferences.setPlaybackSpeed(1.0f);
             return 1.0f;
         }
     }
@@ -345,7 +415,7 @@ public class UserPreferences {
             return Float.parseFloat(prefs.getString(PREF_VIDEO_PLAYBACK_SPEED, "1.00"));
         } catch (NumberFormatException e) {
             Log.e(TAG, Log.getStackTraceString(e));
-            UserPreferences.setVideoPlaybackSpeed("1.00");
+            UserPreferences.setVideoPlaybackSpeed(1.0f);
             return 1.0f;
         }
     }
@@ -354,7 +424,7 @@ public class UserPreferences {
         return prefs.getBoolean(PREF_PLAYBACK_SKIP_SILENCE, false);
     }
 
-    public static String[] getPlaybackSpeedArray() {
+    public static List<Float> getPlaybackSpeedArray() {
         return readPlaybackSpeedArray(prefs.getString(PREF_PLAYBACK_SPEED_ARRAY, null));
     }
 
@@ -490,12 +560,17 @@ public class UserPreferences {
         return prefs.getBoolean(PREF_ENABLE_AUTODL, false);
     }
 
+    @VisibleForTesting
+    public static void setEnableAutodownload(boolean enabled) {
+        prefs.edit().putBoolean(PREF_ENABLE_AUTODL, enabled).apply();
+    }
+
     public static boolean isEnableAutodownloadOnBattery() {
         return prefs.getBoolean(PREF_ENABLE_AUTODL_ON_BATTERY, true);
     }
 
     public static boolean isEnableAutodownloadWifiFilter() {
-        return prefs.getBoolean(PREF_ENABLE_AUTODL_WIFI_FILTER, false);
+        return Build.VERSION.SDK_INT < 29 && prefs.getBoolean(PREF_ENABLE_AUTODL_WIFI_FILTER, false);
     }
 
     public static int getImageCacheSize() {
@@ -507,8 +582,7 @@ public class UserPreferences {
             prefs.edit().putString(PREF_IMAGE_CACHE_SIZE, IMAGE_CACHE_DEFAULT_VALUE).apply();
             cacheSizeInt = Integer.parseInt(IMAGE_CACHE_DEFAULT_VALUE);
         }
-        int cacheSizeMB = cacheSizeInt * 1024 * 1024;
-        return cacheSizeMB;
+        return cacheSizeInt * 1024 * 1024;
     }
 
     public static int getFastForwardSecs() {
@@ -564,8 +638,7 @@ public class UserPreferences {
     }
 
     public static boolean isQueueLocked() {
-        return prefs.getBoolean(PREF_QUEUE_LOCKED, false)
-                || isQueueKeepSorted();
+        return prefs.getBoolean(PREF_QUEUE_LOCKED, false);
     }
 
     public static void setFastForwardSecs(int secs) {
@@ -580,15 +653,15 @@ public class UserPreferences {
              .apply();
     }
 
-    public static void setPlaybackSpeed(String speed) {
+    public static void setPlaybackSpeed(float speed) {
         prefs.edit()
-             .putString(PREF_PLAYBACK_SPEED, speed)
+             .putString(PREF_PLAYBACK_SPEED, String.valueOf(speed))
              .apply();
     }
 
-    public static void setVideoPlaybackSpeed(String speed) {
+    public static void setVideoPlaybackSpeed(float speed) {
         prefs.edit()
-                .putString(PREF_VIDEO_PLAYBACK_SPEED, speed)
+                .putString(PREF_VIDEO_PLAYBACK_SPEED, String.valueOf(speed))
                 .apply();
     }
 
@@ -598,10 +671,13 @@ public class UserPreferences {
                 .apply();
     }
 
-    public static void setPlaybackSpeedArray(String[] speeds) {
+    public static void setPlaybackSpeedArray(List<Float> speeds) {
+        DecimalFormatSymbols format = new DecimalFormatSymbols(Locale.US);
+        format.setDecimalSeparator('.');
+        DecimalFormat speedFormat = new DecimalFormat("0.00", format);
         JSONArray jsonArray = new JSONArray();
-        for (String speed : speeds) {
-            jsonArray.put(speed);
+        for (float speed : speeds) {
+            jsonArray.put(speedFormat.format(speed));
         }
         prefs.edit()
              .putString(PREF_PLAYBACK_SPEED_ARRAY, jsonArray.toString())
@@ -631,7 +707,7 @@ public class UserPreferences {
              .apply();
         // when updating with an interval, we assume the user wants
         // to update *now* and then every 'hours' interval thereafter.
-        AutoUpdateManager.restartUpdateAlarm();
+        AutoUpdateManager.restartUpdateAlarm(context);
     }
 
     /**
@@ -641,14 +717,14 @@ public class UserPreferences {
         prefs.edit()
              .putString(PREF_UPDATE_INTERVAL, hourOfDay + ":" + minute)
              .apply();
-        AutoUpdateManager.restartUpdateAlarm();
+        AutoUpdateManager.restartUpdateAlarm(context);
     }
 
-    public static void disableAutoUpdate() {
+    public static void disableAutoUpdate(Context context) {
         prefs.edit()
                 .putString(PREF_UPDATE_INTERVAL, "0")
                 .apply();
-        AutoUpdateManager.disableAutoUpdate();
+        AutoUpdateManager.disableAutoUpdate(context);
     }
 
     public static boolean gpodnetNotificationsEnabled() {
@@ -711,24 +787,22 @@ public class UserPreferences {
         }
     }
 
-    private static String[] readPlaybackSpeedArray(String valueFromPrefs) {
-        String[] selectedSpeeds = null;
-        // If this preference hasn't been set yet, return the default options
-        if (valueFromPrefs == null) {
-            selectedSpeeds = new String[] { "0.75", "1.00", "1.25", "1.50", "1.75", "2.00" };
-        } else {
+    private static List<Float> readPlaybackSpeedArray(String valueFromPrefs) {
+        if (valueFromPrefs != null) {
             try {
                 JSONArray jsonArray = new JSONArray(valueFromPrefs);
-                selectedSpeeds = new String[jsonArray.length()];
+                List<Float> selectedSpeeds = new ArrayList<>();
                 for (int i = 0; i < jsonArray.length(); i++) {
-                    selectedSpeeds[i] = jsonArray.getString(i);
+                    selectedSpeeds.add((float) jsonArray.getDouble(i));
                 }
+                return selectedSpeeds;
             } catch (JSONException e) {
                 Log.e(TAG, "Got JSON error when trying to get speeds from JSONArray");
                 e.printStackTrace();
             }
         }
-        return selectedSpeeds;
+        // If this preference hasn't been set yet, return the default options
+        return Arrays.asList(0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f);
     }
 
     public static String getMediaPlayer() {
@@ -747,6 +821,10 @@ public class UserPreferences {
         prefs.edit().putString(PREF_MEDIA_PLAYER, "sonic").apply();
     }
 
+    public static void enableExoplayer() {
+        prefs.edit().putString(PREF_MEDIA_PLAYER, PREF_MEDIA_PLAYER_EXOPLAYER).apply();
+    }
+
     public static boolean stereoToMono() {
         return prefs.getBoolean(PREF_STEREO_TO_MONO, false);
     }
@@ -758,15 +836,18 @@ public class UserPreferences {
     }
 
     public static VideoBackgroundBehavior getVideoBackgroundBehavior() {
-        switch (prefs.getString(PREF_VIDEO_BEHAVIOR, "stop")) {
+        switch (prefs.getString(PREF_VIDEO_BEHAVIOR, "pip")) {
             case "stop": return VideoBackgroundBehavior.STOP;
-            case "pip": return VideoBackgroundBehavior.PICTURE_IN_PICTURE;
             case "continue": return VideoBackgroundBehavior.CONTINUE_PLAYING;
-            default: return VideoBackgroundBehavior.STOP;
+            case "pip": //Deliberate fall-through
+            default: return VideoBackgroundBehavior.PICTURE_IN_PICTURE;
         }
     }
 
     public static EpisodeCleanupAlgorithm getEpisodeCleanupAlgorithm() {
+        if (!isEnableAutodownload()) {
+            return new APNullCleanupAlgorithm();
+        }
         int cleanupValue = getEpisodeCleanupValue();
         if (cleanupValue == EPISODE_CLEANUP_QUEUE) {
             return new APQueueCleanupAlgorithm();
@@ -778,7 +859,7 @@ public class UserPreferences {
     }
 
     public static int getEpisodeCleanupValue() {
-        return Integer.parseInt(prefs.getString(PREF_EPISODE_CLEANUP, "-1"));
+        return Integer.parseInt(prefs.getString(PREF_EPISODE_CLEANUP, "" + EPISODE_CLEANUP_NULL));
     }
 
     public static void setEpisodeCleanupValue(int episodeCleanupValue) {
@@ -845,7 +926,6 @@ public class UserPreferences {
         prefs.edit()
              .putString(PREF_DATA_FOLDER, dir)
              .apply();
-        createImportDirectory();
     }
 
     /**
@@ -861,24 +941,6 @@ public class UserPreferences {
                 e.printStackTrace();
             }
             Log.d(TAG, ".nomedia file created");
-        }
-    }
-
-    /**
-     * Creates the import directory if it doesn't exist and if storage is
-     * available
-     */
-    private static void createImportDirectory() {
-        File importDir = getDataFolder(IMPORT_DIR);
-        if (importDir != null) {
-            if (importDir.exists()) {
-                Log.d(TAG, "Import directory already exists");
-            } else {
-                Log.d(TAG, "Creating import directory");
-                importDir.mkdir();
-            }
-        } else {
-            Log.d(TAG, "Could not access external storage.");
         }
     }
 
@@ -908,11 +970,11 @@ public class UserPreferences {
 
     public static BackButtonBehavior getBackButtonBehavior() {
         switch (prefs.getString(PREF_BACK_BUTTON_BEHAVIOR, "default")) {
-            case "default": return BackButtonBehavior.DEFAULT;
             case "drawer": return BackButtonBehavior.OPEN_DRAWER;
             case "doubletap": return BackButtonBehavior.DOUBLE_TAP;
             case "prompt": return BackButtonBehavior.SHOW_PROMPT;
             case "page": return BackButtonBehavior.GO_TO_PAGE;
+            case "default": // Deliberate fall-through
             default: return BackButtonBehavior.DEFAULT;
         }
     }
@@ -929,6 +991,14 @@ public class UserPreferences {
 
     public static boolean timeRespectsSpeed() {
         return prefs.getBoolean(PREF_TIME_RESPECTS_SPEED, false);
+    }
+
+    public static boolean isStreamOverDownload() {
+        return prefs.getBoolean(PREF_STREAM_OVER_DOWNLOAD, false);
+    }
+
+    public static void setStreamOverDownload(boolean stream) {
+        prefs.edit().putBoolean(PREF_STREAM_OVER_DOWNLOAD, stream).apply();
     }
 
     /**
@@ -975,4 +1045,16 @@ public class UserPreferences {
                 .putString(PREF_QUEUE_KEEP_SORTED_ORDER, sortOrder.name())
                 .apply();
     }
+
+    public static int getFeedFilter() {
+        String value = prefs.getString(PREF_FILTER_FEED, "" + FEED_FILTER_NONE);
+        return Integer.parseInt(value);
+    }
+
+    public static void setFeedFilter(String value) {
+        prefs.edit()
+                .putString(PREF_FILTER_FEED, value)
+                .apply();
+    }
+
 }

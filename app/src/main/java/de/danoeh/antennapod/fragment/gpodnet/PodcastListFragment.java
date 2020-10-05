@@ -4,6 +4,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.Toolbar;
 import androidx.fragment.app.Fragment;
 import androidx.core.view.MenuItemCompat;
 import androidx.appcompat.widget.SearchView;
@@ -25,16 +27,17 @@ import de.danoeh.antennapod.R;
 import de.danoeh.antennapod.activity.MainActivity;
 import de.danoeh.antennapod.activity.OnlineFeedViewActivity;
 import de.danoeh.antennapod.adapter.gpodnet.PodcastListAdapter;
-import de.danoeh.antennapod.core.gpoddernet.GpodnetService;
-import de.danoeh.antennapod.core.gpoddernet.GpodnetServiceException;
-import de.danoeh.antennapod.core.gpoddernet.model.GpodnetPodcast;
-import de.danoeh.antennapod.menuhandler.MenuItemUtils;
+import de.danoeh.antennapod.core.preferences.GpodnetPreferences;
+import de.danoeh.antennapod.core.service.download.AntennapodHttpClient;
+import de.danoeh.antennapod.core.sync.gpoddernet.GpodnetService;
+import de.danoeh.antennapod.core.sync.gpoddernet.GpodnetServiceException;
+import de.danoeh.antennapod.core.sync.gpoddernet.model.GpodnetPodcast;
 
 /**
  * Displays a list of GPodnetPodcast-Objects in a GridView
  */
 public abstract class PodcastListFragment extends Fragment {
-
+    public static final String ARGUMENT_HIDE_TOOLBAR = "hideToolbar";
     private static final String TAG = "PodcastListFragment";
 
     private GridView gridView;
@@ -53,10 +56,9 @@ public abstract class PodcastListFragment extends Fragment {
         super.onCreateOptionsMenu(menu, inflater);
         inflater.inflate(R.menu.gpodder_podcasts, menu);
         MenuItem searchItem = menu.findItem(R.id.action_search);
-        final SearchView sv = (SearchView) MenuItemCompat.getActionView(searchItem);
-        MenuItemUtils.adjustTextColor(getActivity(), sv);
+        final SearchView sv = (SearchView) searchItem.getActionView();
         sv.setQueryHint(getString(R.string.gpodnet_search_hint));
-        sv.setOnQueryTextListener(new androidx.appcompat.widget.SearchView.OnQueryTextListener() {
+        sv.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
             @Override
             public boolean onQueryTextSubmit(String s) {
                 sv.clearFocus();
@@ -77,6 +79,13 @@ public abstract class PodcastListFragment extends Fragment {
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
         View root = inflater.inflate(R.layout.gpodnet_podcast_list, container, false);
+        Toolbar toolbar = root.findViewById(R.id.toolbar);
+        if (getArguments() == null || !getArguments().getBoolean(ARGUMENT_HIDE_TOOLBAR, false)) {
+            toolbar.setTitle(R.string.gpodnet_main_label);
+            ((AppCompatActivity) getActivity()).setSupportActionBar(toolbar);
+        } else {
+            toolbar.setVisibility(View.GONE);
+        }
 
         gridView = root.findViewById(R.id.gridView);
         progressBar = root.findViewById(R.id.progressBar);
@@ -95,7 +104,6 @@ public abstract class PodcastListFragment extends Fragment {
         Log.d(TAG, "Selected podcast: " + selection.toString());
         Intent intent = new Intent(getActivity(), OnlineFeedViewActivity.class);
         intent.putExtra(OnlineFeedViewActivity.ARG_FEEDURL, selection.getUrl());
-        intent.putExtra(OnlineFeedViewActivity.ARG_TITLE, getString(R.string.gpodnet_main_label));
         startActivity(intent);
     }
 
@@ -107,18 +115,14 @@ public abstract class PodcastListFragment extends Fragment {
 
             @Override
             protected List<GpodnetPodcast> doInBackground(Void... params) {
-                GpodnetService service = null;
                 try {
-                    service = new GpodnetService();
+                    GpodnetService service = new GpodnetService(AntennapodHttpClient.getHttpClient(),
+                            GpodnetPreferences.getHostname());
                     return loadPodcastData(service);
                 } catch (GpodnetServiceException e) {
                     exception = e;
                     e.printStackTrace();
                     return null;
-                } finally {
-                    if (service != null) {
-                        service.shutdown();
-                    }
                 }
             }
 

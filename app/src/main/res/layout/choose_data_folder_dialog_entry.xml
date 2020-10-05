@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/root"
     android:layout_width="match_parent"
@@ -37,12 +36,11 @@
             android:layout_height="wrap_content"
             tools:text="2 GB" />
 
-        <me.zhanghai.android.materialprogressbar.MaterialProgressBar
+        <ProgressBar
             android:id="@+id/used_space"
-            style="@style/Widget.MaterialProgressBar.ProgressBar.Horizontal"
+            style="?android:attr/progressBarStyleHorizontal"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            app:mpb_progressStyle="horizontal" />
+            android:layout_height="wrap_content" />
     </LinearLayout>
 
 </RelativeLayout>

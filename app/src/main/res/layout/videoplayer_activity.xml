@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/black"
@@ -26,6 +27,8 @@
         android:layout_height="wrap_content"
         android:layout_gravity="center"
         android:layoutDirection="ltr"
+        android:background="@android:color/transparent"
+        android:padding="16dp"
         android:orientation="horizontal">
 
         <ImageButton
@@ -33,29 +36,37 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_margin="8dp"
-            android:background="@drawable/md_transparent"
+            android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/rewind_label"
-            android:src="@drawable/ic_av_fast_rewind_white_80dp" />
+            app:srcCompat="@drawable/ic_av_fast_rewind_white_80dp" />
 
         <ImageButton
             android:id="@+id/butPlay"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_margin="8dp"
-            android:background="@drawable/md_transparent"
+            android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/pause_label"
-            android:src="@drawable/ic_av_pause_white_80dp" />
+            app:srcCompat="@drawable/ic_av_pause_white_80dp" />
 
         <ImageButton
             android:id="@+id/butFF"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_margin="8dp"
-            android:background="@drawable/md_transparent"
+            android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/fast_forward_label"
-            android:src="@drawable/ic_av_fast_forward_white_80dp" />
+            app:srcCompat="@drawable/ic_av_fast_forward_white_80dp" />
 
     </LinearLayout>
+
+    <ImageView
+        android:id="@+id/skip_animation"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:visibility="gone"
+        android:padding="64dp"
+        android:layout_gravity="center"/>
 
     <LinearLayout
         android:id="@+id/overlay"

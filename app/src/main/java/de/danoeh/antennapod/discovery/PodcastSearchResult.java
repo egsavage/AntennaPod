@@ -1,7 +1,7 @@
 package de.danoeh.antennapod.discovery;
 
 import androidx.annotation.Nullable;
-import de.danoeh.antennapod.core.gpoddernet.model.GpodnetPodcast;
+import de.danoeh.antennapod.core.sync.gpoddernet.model.GpodnetPodcast;
 import de.mfietz.fyydlin.SearchHit;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -25,15 +25,26 @@ public class PodcastSearchResult {
     @Nullable
     public final String feedUrl;
 
+    /**
+     * artistName of the podcast feed
+     */
+    @Nullable
+    public final String author;
 
-    private PodcastSearchResult(String title, @Nullable String imageUrl, @Nullable String feedUrl) {
+
+    private PodcastSearchResult(String title, @Nullable String imageUrl, @Nullable String feedUrl, @Nullable String author) {
         this.title = title;
         this.imageUrl = imageUrl;
         this.feedUrl = feedUrl;
+        this.author = author;
+    }
+
+    private PodcastSearchResult(String title, @Nullable String imageUrl, @Nullable String feedUrl) {
+        this(title, imageUrl, feedUrl, "");
     }
 
     public static PodcastSearchResult dummy() {
-        return new PodcastSearchResult("", "", "");
+        return new PodcastSearchResult("", "", "", "");
     }
 
     /**
@@ -46,7 +57,8 @@ public class PodcastSearchResult {
         String title = json.optString("collectionName", "");
         String imageUrl = json.optString("artworkUrl100", null);
         String feedUrl = json.optString("feedUrl", null);
-        return new PodcastSearchResult(title, imageUrl, feedUrl);
+        String author = json.optString("artistName", null);
+        return new PodcastSearchResult(title, imageUrl, feedUrl, author);
     }
 
     /**
@@ -68,14 +80,35 @@ public class PodcastSearchResult {
         }
         String feedUrl = "https://itunes.apple.com/lookup?id=" +
                 json.getJSONObject("id").getJSONObject("attributes").getString("im:id");
-        return new PodcastSearchResult(title, imageUrl, feedUrl);
+
+        String author = null;
+        try {
+            author = json.getJSONObject("im:artist").getString("label");
+        } catch (Exception e) {
+            // Some feeds have empty artist
+        }
+        return new PodcastSearchResult(title, imageUrl, feedUrl, author);
     }
 
     public static PodcastSearchResult fromFyyd(SearchHit searchHit) {
-        return new PodcastSearchResult(searchHit.getTitle(), searchHit.getThumbImageURL(), searchHit.getXmlUrl());
+        return new PodcastSearchResult(searchHit.getTitle(),
+                                       searchHit.getThumbImageURL(),
+                                       searchHit.getXmlUrl(),
+                                       searchHit.getAuthor());
     }
 
     public static PodcastSearchResult fromGpodder(GpodnetPodcast searchHit) {
-        return new PodcastSearchResult(searchHit.getTitle(), searchHit.getLogoUrl(), searchHit.getUrl());
+        return new PodcastSearchResult(searchHit.getTitle(),
+                                       searchHit.getLogoUrl(),
+                                       searchHit.getUrl(),
+                                       searchHit.getAuthor());
+    }
+
+    public static PodcastSearchResult fromPodcastIndex(JSONObject json) {
+        String title = json.optString("title", "");
+        String imageUrl = json.optString("image", null);
+        String feedUrl = json.optString("url", null);
+        String author = json.optString("author", null);
+        return new PodcastSearchResult(title, imageUrl, feedUrl, author);
     }
 }

@@ -1,54 +1,73 @@
 package de.danoeh.antennapod.fragment;
 
-import android.content.Context;
 import android.os.Bundle;
-import androidx.annotation.NonNull;
-import androidx.fragment.app.ListFragment;
-import androidx.core.view.MenuItemCompat;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.appcompat.widget.SearchView;
 import android.util.Log;
+import android.util.Pair;
+import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
-import android.widget.ListView;
-
-import java.util.ArrayList;
-import java.util.List;
-
+import android.view.ViewGroup;
+import android.widget.ProgressBar;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.SearchView;
+import androidx.fragment.app.Fragment;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 import de.danoeh.antennapod.R;
 import de.danoeh.antennapod.activity.MainActivity;
-import de.danoeh.antennapod.adapter.SearchlistAdapter;
-import de.danoeh.antennapod.core.feed.EventDistributor;
+import de.danoeh.antennapod.adapter.EpisodeItemListAdapter;
+import de.danoeh.antennapod.adapter.FeedSearchResultAdapter;
+import de.danoeh.antennapod.core.event.DownloadEvent;
+import de.danoeh.antennapod.core.event.DownloaderUpdate;
+import de.danoeh.antennapod.core.event.FeedItemEvent;
+import de.danoeh.antennapod.core.event.PlaybackPositionEvent;
+import de.danoeh.antennapod.core.event.PlayerStatusEvent;
+import de.danoeh.antennapod.core.event.UnreadItemsUpdateEvent;
 import de.danoeh.antennapod.core.feed.Feed;
-import de.danoeh.antennapod.core.feed.FeedComponent;
 import de.danoeh.antennapod.core.feed.FeedItem;
-import de.danoeh.antennapod.core.feed.SearchResult;
 import de.danoeh.antennapod.core.storage.FeedSearcher;
+import de.danoeh.antennapod.core.util.FeedItemUtil;
+import de.danoeh.antennapod.menuhandler.FeedItemMenuHandler;
+import de.danoeh.antennapod.view.EmptyViewHandler;
+import de.danoeh.antennapod.view.EpisodeItemListRecyclerView;
+import de.danoeh.antennapod.view.viewholder.EpisodeItemViewHolder;
 import io.reactivex.Observable;
 import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.schedulers.Schedulers;
+import org.greenrobot.eventbus.EventBus;
+import org.greenrobot.eventbus.Subscribe;
+import org.greenrobot.eventbus.ThreadMode;
+
+import java.util.List;
 
 /**
  * Performs a search operation on all feeds or one specific feed and displays the search result.
  */
-public class SearchFragment extends ListFragment {
+public class SearchFragment extends Fragment {
     private static final String TAG = "SearchFragment";
-
     private static final String ARG_QUERY = "query";
     private static final String ARG_FEED = "feed";
 
-    private SearchlistAdapter searchAdapter;
-    private List<SearchResult> searchResults = new ArrayList<>();
+    private EpisodeItemListAdapter adapter;
+    private FeedSearchResultAdapter adapterFeeds;
     private Disposable disposable;
+    private ProgressBar progressBar;
+    private EmptyViewHandler emptyViewHandler;
+    private EpisodeItemListRecyclerView recyclerView;
+    private List<FeedItem> results;
 
     /**
      * Create a new SearchFragment that searches all feeds.
      */
     public static SearchFragment newInstance(String query) {
-        if (query == null) query = "";
+        if (query == null) {
+            query = "";
+        }
         SearchFragment fragment = new SearchFragment();
         Bundle args = new Bundle();
         args.putString(ARG_QUERY, query);
@@ -76,57 +95,61 @@ public class SearchFragment extends ListFragment {
     @Override
     public void onStart() {
         super.onStart();
-        EventDistributor.getInstance().register(contentUpdate);
         search();
     }
 
     @Override
     public void onStop() {
         super.onStop();
-        if(disposable != null) {
+        if (disposable != null) {
             disposable.dispose();
         }
-        EventDistributor.getInstance().unregister(contentUpdate);
+    }
+
+    @Nullable
+    @Override
+    public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container,
+                             @Nullable Bundle savedInstanceState) {
+        View layout = inflater.inflate(R.layout.search_fragment, container, false);
+        ((AppCompatActivity) getActivity()).setSupportActionBar(layout.findViewById(R.id.toolbar));
+        progressBar = layout.findViewById(R.id.progressBar);
+
+        recyclerView = layout.findViewById(R.id.recyclerView);
+        recyclerView.setRecycledViewPool(((MainActivity) getActivity()).getRecycledViewPool());
+        recyclerView.setVisibility(View.GONE);
+        adapter = new EpisodeItemListAdapter((MainActivity) getActivity());
+        recyclerView.setAdapter(adapter);
+
+        RecyclerView recyclerViewFeeds = layout.findViewById(R.id.recyclerViewFeeds);
+        LinearLayoutManager layoutManagerFeeds = new LinearLayoutManager(getActivity());
+        layoutManagerFeeds.setOrientation(RecyclerView.HORIZONTAL);
+        recyclerViewFeeds.setLayoutManager(layoutManagerFeeds);
+        adapterFeeds = new FeedSearchResultAdapter((MainActivity) getActivity());
+        recyclerViewFeeds.setAdapter(adapterFeeds);
+
+        emptyViewHandler = new EmptyViewHandler(getContext());
+        emptyViewHandler.attachToRecyclerView(recyclerView);
+        emptyViewHandler.setIcon(R.attr.action_search);
+        emptyViewHandler.setTitle(R.string.search_status_no_results);
+        EventBus.getDefault().register(this);
+        return layout;
     }
 
     @Override
-    public void onViewCreated(View view, Bundle savedInstanceState) {
-        super.onViewCreated(view, savedInstanceState);
-
-        // add padding
-        final ListView lv = getListView();
-        lv.setClipToPadding(false);
-        final int vertPadding = getResources().getDimensionPixelSize(R.dimen.list_vertical_padding);
-        lv.setPadding(0, vertPadding, 0, vertPadding);
-
-        ((AppCompatActivity) getActivity()).getSupportActionBar().setTitle(R.string.search_label);
-
-        searchAdapter = new SearchlistAdapter(getActivity(), itemAccess);
-        setListAdapter(searchAdapter);
+    public void onDestroyView() {
+        super.onDestroyView();
+        EventBus.getDefault().unregister(this);
     }
 
     @Override
-    public void onListItemClick(ListView l, View v, int position, long id) {
-        super.onListItemClick(l, v, position, id);
-        SearchResult result = (SearchResult) l.getAdapter().getItem(position);
-        FeedComponent comp = result.getComponent();
-        if (comp.getClass() == Feed.class) {
-            ((MainActivity) getActivity()).loadFeedFragmentById(comp.getId(), null);
-        } else {
-            if (comp.getClass() == FeedItem.class) {
-                FeedItem item = (FeedItem) comp;
-                ((MainActivity) getActivity()).loadChildFragment(ItemFragment.newInstance(item.getId()));
-            }
-        }
-    }
-
-    @Override
-    public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
+    public void onCreateOptionsMenu(@NonNull Menu menu, @NonNull MenuInflater inflater) {
         super.onCreateOptionsMenu(menu, inflater);
-        MenuItem item = menu.add(Menu.NONE, R.id.search_item, Menu.NONE, R.string.search_label);
-        MenuItemCompat.setShowAsAction(item, MenuItemCompat.SHOW_AS_ACTION_IF_ROOM);
-        final SearchView sv = new SearchView(getActivity());
-        sv.setQueryHint(getString(R.string.search_hint));
+        inflater.inflate(R.menu.search, menu);
+        MenuItem item = menu.findItem(R.id.action_search);
+        item.expandActionView();
+        final SearchView sv = (SearchView) item.getActionView();
+        sv.setQueryHint(getString(R.string.search_label));
+        sv.clearFocus();
         sv.setQuery(getArguments().getString(ARG_QUERY), false);
         sv.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
             @Override
@@ -142,58 +165,112 @@ public class SearchFragment extends ListFragment {
                 return false;
             }
         });
-        MenuItemCompat.setActionView(item, sv);
+        item.setOnActionExpandListener(new MenuItem.OnActionExpandListener() {
+            @Override
+            public boolean onMenuItemActionExpand(MenuItem item) {
+                return true;
+            }
+
+            @Override
+            public boolean onMenuItemActionCollapse(MenuItem item) {
+                getParentFragmentManager().popBackStack();
+                return true;
+            }
+        });
     }
 
-    private final EventDistributor.EventListener contentUpdate = new EventDistributor.EventListener() {
-        @Override
-        public void update(EventDistributor eventDistributor, Integer arg) {
-            if ((arg & (EventDistributor.UNREAD_ITEMS_UPDATE
-                    | EventDistributor.DOWNLOAD_HANDLED)) != 0) {
-                search();
-            }
+    @Override
+    public boolean onContextItemSelected(@NonNull MenuItem item) {
+        FeedItem selectedItem = adapter.getSelectedItem();
+        if (selectedItem == null) {
+            Log.i(TAG, "Selected item at current position was null, ignoring selection");
+            return super.onContextItemSelected(item);
         }
-    };
-
-    private void onSearchResults(List<SearchResult> results) {
-        searchResults = results;
-        searchAdapter.notifyDataSetChanged();
-        String query = getArguments().getString(ARG_QUERY);
-        setEmptyText(getString(R.string.no_results_for_query, query));
+        return FeedItemMenuHandler.onMenuItemClicked(this, item.getItemId(), selectedItem);
     }
 
-    private final SearchlistAdapter.ItemAccess itemAccess = new SearchlistAdapter.ItemAccess() {
-        @Override
-        public int getCount() {
-            return searchResults.size();
-        }
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    public void onUnreadItemsChanged(UnreadItemsUpdateEvent event) {
+        search();
+    }
 
-        @Override
-        public SearchResult getItem(int position) {
-            if (0 <= position && position < searchResults.size()) {
-                return searchResults.get(position);
-            } else {
-                return null;
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    public void onEventMainThread(FeedItemEvent event) {
+        Log.d(TAG, "onEventMainThread() called with: " + "event = [" + event + "]");
+        if (results == null) {
+            return;
+        } else if (adapter == null) {
+            search();
+            return;
+        }
+        for (int i = 0, size = event.items.size(); i < size; i++) {
+            FeedItem item = event.items.get(i);
+            int pos = FeedItemUtil.indexOfItemWithId(results, item.getId());
+            if (pos >= 0) {
+                results.remove(pos);
+                results.add(pos, item);
+                adapter.notifyItemChangedCompat(pos);
             }
         }
-    };
+    }
+
+    @Subscribe(sticky = true, threadMode = ThreadMode.MAIN)
+    public void onEventMainThread(DownloadEvent event) {
+        Log.d(TAG, "onEventMainThread() called with: " + "event = [" + event + "]");
+        DownloaderUpdate update = event.update;
+        if (adapter != null && update.mediaIds.length > 0) {
+            for (long mediaId : update.mediaIds) {
+                int pos = FeedItemUtil.indexOfItemWithMediaId(results, mediaId);
+                if (pos >= 0) {
+                    adapter.notifyItemChangedCompat(pos);
+                }
+            }
+        }
+    }
+
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    public void onEventMainThread(PlaybackPositionEvent event) {
+        if (adapter != null) {
+            for (int i = 0; i < adapter.getItemCount(); i++) {
+                EpisodeItemViewHolder holder = (EpisodeItemViewHolder) recyclerView.findViewHolderForAdapterPosition(i);
+                if (holder != null && holder.isCurrentlyPlayingItem()) {
+                    holder.notifyPlaybackPositionUpdated(event);
+                    break;
+                }
+            }
+        }
+    }
+
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    public void onPlayerStatusChanged(PlayerStatusEvent event) {
+        search();
+    }
 
     private void search() {
-        if(disposable != null) {
+        if (disposable != null) {
             disposable.dispose();
         }
+        progressBar.setVisibility(View.VISIBLE);
+        emptyViewHandler.hide();
         disposable = Observable.fromCallable(this::performSearch)
                 .subscribeOn(Schedulers.io())
                 .observeOn(AndroidSchedulers.mainThread())
-                .subscribe(this::onSearchResults, error -> Log.e(TAG, Log.getStackTraceString(error)));
+                .subscribe(results -> {
+                    progressBar.setVisibility(View.GONE);
+                    this.results = results.first;
+                    adapter.updateItems(results.first);
+                    adapterFeeds.updateData(results.second);
+                    String query = getArguments().getString(ARG_QUERY);
+                    emptyViewHandler.setMessage(getString(R.string.no_results_for_query, query));
+                }, error -> Log.e(TAG, Log.getStackTraceString(error)));
     }
 
     @NonNull
-    private List<SearchResult> performSearch() {
-        Bundle args = getArguments();
-        String query = args.getString(ARG_QUERY);
-        long feed = args.getLong(ARG_FEED);
-        Context context = getActivity();
-        return FeedSearcher.performSearch(context, query, feed);
+    private Pair<List<FeedItem>, List<Feed>> performSearch() {
+        String query = getArguments().getString(ARG_QUERY);
+        long feed = getArguments().getLong(ARG_FEED);
+        List<FeedItem> items = FeedSearcher.searchFeedItems(getContext(), query, feed);
+        List<Feed> feeds = FeedSearcher.searchFeeds(getContext(), query);
+        return new Pair<>(items, feeds);
     }
 }

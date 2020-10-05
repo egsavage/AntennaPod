@@ -2,16 +2,18 @@ package de.danoeh.antennapod.fragment;
 
 import android.content.Intent;
 import android.os.Bundle;
+import android.util.DisplayMetrics;
 import androidx.fragment.app.Fragment;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
+import android.widget.Button;
 import android.widget.GridView;
+import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
-import com.afollestad.materialdialogs.MaterialDialog;
 import de.danoeh.antennapod.R;
 import de.danoeh.antennapod.activity.MainActivity;
 import de.danoeh.antennapod.activity.OnlineFeedViewActivity;
@@ -26,12 +28,14 @@ import java.util.List;
 
 public class QuickFeedDiscoveryFragment extends Fragment implements AdapterView.OnItemClickListener {
     private static final String TAG = "FeedDiscoveryFragment";
+    private static final int NUM_SUGGESTIONS = 12;
 
     private ProgressBar progressBar;
     private Disposable disposable;
     private FeedDiscoverAdapter adapter;
-    private GridView subscriptionGridLayout;
+    private GridView discoverGridLayout;
     private TextView errorTextView;
+    private LinearLayout errorView;
 
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
@@ -39,26 +43,36 @@ public class QuickFeedDiscoveryFragment extends Fragment implements AdapterView.
         View root = inflater.inflate(R.layout.quick_feed_discovery, container, false);
         View discoverMore = root.findViewById(R.id.discover_more);
         discoverMore.setOnClickListener(v ->
-                ((MainActivity) getActivity()).loadChildFragment(new ItunesSearchFragment()));
+                ((MainActivity) getActivity()).loadChildFragment(new DiscoveryFragment()));
 
-        subscriptionGridLayout = root.findViewById(R.id.discover_grid);
+        discoverGridLayout = root.findViewById(R.id.discover_grid);
         progressBar = root.findViewById(R.id.discover_progress_bar);
-        errorTextView = root.findViewById(R.id.discover_error);
+        errorView = root.findViewById(R.id.discover_error);
+        errorTextView = root.findViewById(R.id.discover_error_txtV);
+        Button errorRetry = root.findViewById(R.id.discover_error_retry_btn);
+        errorRetry.setOnClickListener((listener) -> loadToplist());
 
         adapter = new FeedDiscoverAdapter((MainActivity) getActivity());
-        subscriptionGridLayout.setAdapter(adapter);
-        subscriptionGridLayout.setOnItemClickListener(this);
+        discoverGridLayout.setAdapter(adapter);
+        discoverGridLayout.setOnItemClickListener(this);
+
+        DisplayMetrics displayMetrics = getContext().getResources().getDisplayMetrics();
+        float screenWidthDp = displayMetrics.widthPixels / displayMetrics.density;
+        if (screenWidthDp > 600) {
+            discoverGridLayout.setNumColumns(6);
+        } else {
+            discoverGridLayout.setNumColumns(4);
+        }
 
         // Fill with dummy elements to have a fixed height and
         // prevent the UI elements below from jumping on slow connections
         List<PodcastSearchResult> dummies = new ArrayList<>();
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < NUM_SUGGESTIONS; i++) {
             dummies.add(PodcastSearchResult.dummy());
         }
+
         adapter.updateData(dummies);
-
         loadToplist();
-
         return root;
     }
 
@@ -72,22 +86,22 @@ public class QuickFeedDiscoveryFragment extends Fragment implements AdapterView.
 
     private void loadToplist() {
         progressBar.setVisibility(View.VISIBLE);
-        subscriptionGridLayout.setVisibility(View.INVISIBLE);
-        errorTextView.setVisibility(View.GONE);
+        discoverGridLayout.setVisibility(View.INVISIBLE);
+        errorView.setVisibility(View.GONE);
 
         ItunesTopListLoader loader = new ItunesTopListLoader(getContext());
-        disposable = loader.loadToplist(8)
+        disposable = loader.loadToplist(NUM_SUGGESTIONS)
                 .subscribe(podcasts -> {
-                    errorTextView.setVisibility(View.GONE);
+                    errorView.setVisibility(View.GONE);
                     progressBar.setVisibility(View.GONE);
-                    subscriptionGridLayout.setVisibility(View.VISIBLE);
+                    discoverGridLayout.setVisibility(View.VISIBLE);
                     adapter.updateData(podcasts);
                 }, error -> {
                     Log.e(TAG, Log.getStackTraceString(error));
                     errorTextView.setText(error.getLocalizedMessage());
-                    errorTextView.setVisibility(View.VISIBLE);
+                    errorView.setVisibility(View.VISIBLE);
                     progressBar.setVisibility(View.GONE);
-                    subscriptionGridLayout.setVisibility(View.INVISIBLE);
+                    discoverGridLayout.setVisibility(View.INVISIBLE);
                 });
     }
 
@@ -97,23 +111,8 @@ public class QuickFeedDiscoveryFragment extends Fragment implements AdapterView.
         if (podcast.feedUrl == null) {
             return;
         }
-        view.setAlpha(0.5f);
-        ItunesTopListLoader loader = new ItunesTopListLoader(getContext());
-        disposable = loader.getFeedUrl(podcast)
-                .subscribe(feedUrl -> {
-                    view.setAlpha(1f);
-                    Intent intent = new Intent(getActivity(), OnlineFeedViewActivity.class);
-                    intent.putExtra(OnlineFeedViewActivity.ARG_FEEDURL, feedUrl);
-                    intent.putExtra(OnlineFeedViewActivity.ARG_TITLE, getString(R.string.add_feed_label));
-                    startActivity(intent);
-                }, error -> {
-                    Log.e(TAG, Log.getStackTraceString(error));
-                    view.setAlpha(1f);
-                    String prefix = getString(R.string.error_msg_prefix);
-                    new MaterialDialog.Builder(getActivity())
-                            .content(prefix + " " + error.getMessage())
-                            .neutralText(android.R.string.ok)
-                            .show();
-                });
+        Intent intent = new Intent(getActivity(), OnlineFeedViewActivity.class);
+        intent.putExtra(OnlineFeedViewActivity.ARG_FEEDURL, podcast.feedUrl);
+        startActivity(intent);
     }
 }

@@ -2,32 +2,18 @@ package de.danoeh.antennapod.menuhandler;
 
 import android.content.Context;
 import android.content.res.TypedArray;
-import android.graphics.Color;
-import android.os.Build;
-import androidx.appcompat.widget.SearchView;
 import android.view.Menu;
 import android.view.MenuItem;
-import android.widget.EditText;
-
+import androidx.appcompat.widget.SearchView;
 import de.danoeh.antennapod.R;
+import de.danoeh.antennapod.activity.MainActivity;
 import de.danoeh.antennapod.core.preferences.UserPreferences;
+import de.danoeh.antennapod.fragment.SearchFragment;
 
 /**
  * Utilities for menu items
  */
 public class MenuItemUtils extends de.danoeh.antennapod.core.menuhandler.MenuItemUtils {
-
-    public static void adjustTextColor(Context context, SearchView sv) {
-        if(Build.VERSION.SDK_INT < 14) {
-            EditText searchEditText = sv.findViewById(R.id.search_src_text);
-            if (UserPreferences.getTheme() == de.danoeh.antennapod.R.style.Theme_AntennaPod_Dark
-                    || UserPreferences.getTheme() == R.style.Theme_AntennaPod_TrueBlack) {
-                searchEditText.setTextColor(Color.WHITE);
-            } else {
-                searchEditText.setTextColor(Color.BLACK);
-            }
-        }
-    }
 
     @SuppressWarnings("ResourceType")
     public static void refreshLockItem(Context context, Menu menu) {
@@ -44,4 +30,40 @@ public class MenuItemUtils extends de.danoeh.antennapod.core.menuhandler.MenuIte
         ta.recycle();
     }
 
+    public static void setupSearchItem(Menu menu, MainActivity activity, long feedId) {
+        MenuItem searchItem = menu.findItem(R.id.action_search);
+        final SearchView sv = (SearchView) searchItem.getActionView();
+        sv.setQueryHint(activity.getString(R.string.search_label));
+        sv.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
+            @Override
+            public boolean onQueryTextSubmit(String s) {
+                sv.clearFocus();
+                activity.loadChildFragment(SearchFragment.newInstance(s, feedId));
+                searchItem.collapseActionView();
+                return true;
+            }
+
+            @Override
+            public boolean onQueryTextChange(String s) {
+                return false;
+            }
+        });
+        searchItem.setOnActionExpandListener(new MenuItem.OnActionExpandListener() {
+            @Override
+            public boolean onMenuItemActionExpand(MenuItem item) {
+                for (int i = 0; i < menu.size(); i++) {
+                    if (menu.getItem(i).getItemId() != searchItem.getItemId()) {
+                        menu.getItem(i).setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+                    }
+                }
+                return true;
+            }
+
+            @Override
+            public boolean onMenuItemActionCollapse(MenuItem item) {
+                activity.invalidateOptionsMenu();
+                return true;
+            }
+        });
+    }
 }
